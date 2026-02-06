@@ -1,0 +1,917 @@
+{% extends "layout.html" %}
+{% block content %}
+<style>
+    /* Google Forms Style Tweaks */
+    body {
+        background-color: #f0ebf8;
+    }
+
+    /* Light purple tint background like Forms */
+
+    .quiz-container {
+        max-width: 770px;
+        margin: 0 auto;
+        padding-bottom: 60px;
+    }
+
+    /* Floating Sidebar - Pill Shape */
+    .quiz-sidebar {
+        position: sticky;
+        top: 20px;
+        width: 50px;
+        background: white;
+        border-radius: 25px;
+        /* Full Capsule Roundness */
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        padding: 12px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        margin-left: 20px;
+        z-index: 100;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .sb-btn {
+        border: none;
+        background: none;
+        color: #5f6368;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        position: relative;
+    }
+
+    .sb-btn:hover {
+        background: #f5f5f5;
+        color: #202124;
+    }
+
+    .block-card {
+        background: white;
+        border: 1px solid #dadce0;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        position: relative;
+        transition: box-shadow 0.2s;
+        border-left: 6px solid transparent;
+        /* Reserve space for active indicator */
+    }
+
+    .block-card.active {
+        border-left-color: #4285f4;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .block-card:hover {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .drag-handle {
+        cursor: move;
+        color: #dadce0;
+        text-align: center;
+        margin: -10px 0 10px 0;
+    }
+
+    .drag-handle:hover {
+        color: #5f6368;
+    }
+
+    /* Media Placeholders */
+    .media-placeholder {
+        background: #f8f9fa;
+        border: 2px dashed #dadce0;
+        border-radius: 4px;
+        text-align: center;
+        padding: 24px;
+        cursor: pointer;
+    }
+
+    .media-placeholder:hover {
+        background: #f1f3f4;
+    }
+
+    /* Correct Answer Green Check */
+    .check-correct {
+        color: #dadce0;
+        cursor: pointer;
+        transition: color 0.2s;
+    }
+
+    .check-correct.is-correct {
+        color: #198754;
+    }
+
+    /* Bootstrap Success Green */
+</style>
+
+<div class="container-fluid min-vh-100 py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 px-4">
+        <h4><i class="bi bi-ui-checks-grid me-2"></i> Quiz Editor: {{ course.name }}</h4>
+        <div>
+            <a href="/admin/course/{{ course.id }}/content_manager" class="btn btn-outline-secondary me-2">Back to
+                Content</a>
+            <button class="btn btn-outline-dark me-2" onclick="undo()" id="btnUndo" disabled>
+                <i class="bi bi-arrow-counterclockwise"></i> Undo
+            </button>
+            <button class="btn btn-outline-dark me-2" onclick="showCodeView()" title="Edit JSON Source">
+                <i class="bi bi-code-slash"></i> Code
+            </button>
+            <button class="btn btn-success" onclick="saveQuiz()" id="btnSave">
+                <i class="bi bi-save"></i> Save Changes
+            </button>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-center align-items-start">
+        <!-- MAIN BUILDER AREA -->
+        <div class="quiz-container flex-grow-1" id="quizBuilder">
+            <!-- Blocks render here -->
+        </div>
+
+        <!-- FLOATING SIDEBAR -->
+        <div class="quiz-sidebar">
+            <button class="sb-btn" onclick="addBlock('question')" data-bs-toggle="tooltip" data-bs-placement="right"
+                title="Add Question">
+                <i class="bi bi-plus-circle fs-5"></i>
+            </button>
+            <button class="sb-btn" onclick="addBlock('title')" data-bs-toggle="tooltip" data-bs-placement="right"
+                title="Add Title and Description">
+                <i class="bi bi-type fs-5"></i>
+            </button>
+            <button class="sb-btn" onclick="addBlock('image')" data-bs-toggle="tooltip" data-bs-placement="right"
+                title="Add Image">
+                <i class="bi bi-image fs-5"></i>
+            </button>
+            <button class="sb-btn" onclick="addBlock('video')" data-bs-toggle="tooltip" data-bs-placement="right"
+                title="Add Video">
+                <i class="bi bi-youtube fs-5"></i>
+            </button>
+            <button class="sb-btn" onclick="addBlock('section')" data-bs-toggle="tooltip" data-bs-placement="right"
+                title="Add Section">
+                <i class="bi bi-distribute-vertical fs-5"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="emptyState" class="text-center text-muted mt-5" style="display:none;">
+        <p>Click + on the right to add your first question.</p>
+    </div>
+
+    <!-- Hidden File Input for Uploads -->
+    <input type="file" id="fileUpload" style="display:none;" accept="image/*">
+
+    <!-- CODE VIEW MODAL -->
+    <div class="modal fade" id="codeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Quiz Source Code (JSON)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted">You can edit the raw structure here. Useful for bulk changes or
+                        generating quizzes programmatically.</p>
+                    <textarea id="jsonEditor" class="form-control font-monospace" rows="20"
+                        style="font-size: 0.9rem; background:#2d2d2d; color:#f8f8f2;"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="applyCodeView()">Apply Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= TEMPLATES ================= -->
+
+<!-- 1. QUESTION BLOCK -->
+<template id="tplQuestion">
+    <div class="block-card p-4" onclick="activate(this)">
+        <div class="drag-handle"><i class="bi bi-grip-horizontal text-muted small"></i></div>
+        <div class="row mb-3">
+            <div class="col-8">
+                <input type="text" class="form-control form-control-lg bg-light border-0 q-title"
+                    placeholder="Question">
+            </div>
+            <div class="col-4">
+                <select class="form-select q-type" onchange="changeType(this)">
+                    <option value="short_answer">Short Answer (簡答)</option>
+                    <option value="paragraph">Paragraph (詳答)</option>
+                    <option value="multiple_choice">Multiple Choice (選擇題)</option>
+                    <option value="checkboxes">Checkboxes (核取方塊)</option>
+                    <option value="dropdown">Dropdown (下拉式選單)</option>
+                    <option value="sentence">AI Sentence (AI 造句)</option>
+                    <option value="linear_scale">Linear Scale (線性刻度)</option>
+                    <option value="mcq_grid">MC Grid (單選方格)</option>
+                    <option value="checkbox_grid">Checkbox Grid (核取方格)</option>
+                    <option value="date">Date (日期)</option>
+                    <option value="time">Time (時間)</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Media Attached to Question -->
+        <div class="q-media mb-3" style="display:none;">
+            <img src="" class="img-fluid rounded border d-block mb-2" style="max-height: 300px;">
+            <button class="btn btn-sm btn-outline-danger" onclick="removeMedia(this)">Remove Media</button>
+        </div>
+
+        <div class="q-content mb-3">
+            <!-- Dynamic Options -->
+        </div>
+
+        <!-- AI Sentence Specific Fields -->
+        <div class="q-ai-settings mb-3 p-3 bg-light rounded border" style="display:none;">
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <label class="small fw-bold">Target Word (目標單字)</label>
+                    <input type="text" class="form-control form-control-sm q-ai-word" placeholder="e.g. lament">
+                </div>
+                <div class="col-md-6">
+                    <label class="small fw-bold">Chinese Meaning (中文釋義)</label>
+                    <input type="text" class="form-control form-control-sm q-ai-meaning" placeholder="e.g. 悲嘆">
+                </div>
+                <div class="col-12">
+                    <label class="small fw-bold">Context/Image Description (圖片情境描述)</label>
+                    <textarea class="form-control form-control-sm q-ai-story" rows="2"
+                        placeholder="Describe the image or context for the AI..."></textarea>
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <i class="bi bi-info-circle"></i> AI will use these fields + attached image to score the learner's
+                sentence.
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-end align-items-center pt-3 border-top gap-2">
+            <button class="btn btn-sm btn-outline-secondary rounded-circle" onclick="attachMedia(this)"
+                data-bs-toggle="tooltip" title="Add Image to Question"><i class="bi bi-image"></i></button>
+            <div class="vr"></div>
+            <div class="form-check form-switch pt-1">
+                <input class="form-check-input q-required" type="checkbox">
+                <label class="form-check-label small px-1">Required</label>
+            </div>
+            <div class="vr"></div>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="duplicateBlock(this)" title="Duplicate"><i
+                    class="bi bi-files"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle text-danger" onclick="deleteBlock(this)"
+                title="Delete"><i class="bi bi-trash"></i></button>
+            <div class="vr"></div>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveUp(this)"><i
+                    class="bi bi-chevron-up"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveDown(this)"><i
+                    class="bi bi-chevron-down"></i></button>
+        </div>
+    </div>
+</template>
+
+<!-- 2. TITLE BLOCK -->
+<template id="tplTitle">
+    <div class="block-card p-4" onclick="activate(this)">
+        <div class="drag-handle"><i class="bi bi-grip-horizontal text-muted small"></i></div>
+        <input type="text" class="form-control form-control-lg border-0 mb-2 t-title" placeholder="Untitled Title"
+            style="font-size: 1.5rem;">
+        <textarea class="form-control border-0 t-desc" placeholder="Description (optional)" rows="1"
+            style="resize:none; overflow:hidden;" oninput="autoResize(this)"></textarea>
+        <div class="d-flex justify-content-end pt-2 border-top mt-3 gap-2">
+            <button class="btn btn-sm btn-light rounded-circle text-danger" onclick="deleteBlock(this)"><i
+                    class="bi bi-trash"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveUp(this)"><i
+                    class="bi bi-chevron-up"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveDown(this)"><i
+                    class="bi bi-chevron-down"></i></button>
+        </div>
+    </div>
+</template>
+
+<!-- 3. IMAGE BLOCK -->
+<template id="tplImage">
+    <div class="block-card p-4" onclick="activate(this)">
+        <div class="drag-handle"><i class="bi bi-grip-horizontal text-muted small"></i></div>
+        <input type="text" class="form-control border-0 mb-2 fw-bold i-title" placeholder="Image Title">
+        <div class="media-preview text-center py-2">
+            <img src="" class="img-fluid rounded shadow-sm" style="max-height: 400px; display:none;">
+            <div class="media-placeholder" onclick="promptImage(this)">
+                <i class="bi bi-image fs-1 text-muted"></i>
+                <p class="mb-0 text-muted">Click to set Image URL</p>
+            </div>
+        </div>
+        <div class="d-flex justify-content-end pt-2 mt-2 gap-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="promptImage(this)">Change Image</button>
+            <button class="btn btn-sm btn-light rounded-circle text-danger" onclick="deleteBlock(this)"><i
+                    class="bi bi-trash"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveUp(this)"><i
+                    class="bi bi-chevron-up"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveDown(this)"><i
+                    class="bi bi-chevron-down"></i></button>
+        </div>
+    </div>
+</template>
+
+<!-- 4. VIDEO BLOCK -->
+<template id="tplVideo">
+    <div class="block-card p-4" onclick="activate(this)">
+        <div class="drag-handle"><i class="bi bi-grip-horizontal text-muted small"></i></div>
+        <input type="text" class="form-control border-0 mb-2 fw-bold v-title" placeholder="Video Title">
+        <div class="media-preview text-center py-2">
+            <div class="ratio ratio-16x9 mb-2 video-frame" style="display:none;">
+                <iframe src="" allowfullscreen></iframe>
+            </div>
+            <div class="media-placeholder" onclick="promptVideo(this)">
+                <i class="bi bi-youtube fs-1 text-muted"></i>
+                <p class="mb-0 text-muted">Click to set YouTube URL</p>
+            </div>
+        </div>
+        <div class="d-flex justify-content-end pt-2 mt-2 gap-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="promptVideo(this)">Change Video</button>
+            <button class="btn btn-sm btn-light rounded-circle text-danger" onclick="deleteBlock(this)"><i
+                    class="bi bi-trash"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveUp(this)"><i
+                    class="bi bi-chevron-up"></i></button>
+            <button class="btn btn-sm btn-light rounded-circle" onclick="moveDown(this)"><i
+                    class="bi bi-chevron-down"></i></button>
+        </div>
+    </div>
+</template>
+
+<!-- 5. SECTION BLOCK -->
+<template id="tplSection">
+    <div class="block-card" onclick="activate(this)" style="border-top: 8px solid #673ab7; margin-top: 30px;">
+        <div
+            class="bg-light p-2 text-center small text-muted text-uppercase fw-bold border-bottom d-flex justify-content-between">
+            <span>Section Break</span>
+            <div class="drag-handle my-0"><i class="bi bi-grip-horizontal"></i></div>
+        </div>
+        <div class="p-4">
+            <input type="text" class="form-control form-control-lg border-0 mb-2 s-title" placeholder="Section Title">
+            <input type="text" class="form-control border-0 s-desc" placeholder="Description (optional)">
+            <div class="d-flex justify-content-end pt-2 mt-2 gap-2">
+                <button class="btn btn-sm btn-light rounded-circle text-danger" onclick="deleteBlock(this)"><i
+                        class="bi bi-trash"></i></button>
+                <div class="vr"></div>
+                <button class="btn btn-sm btn-light rounded-circle" onclick="moveUp(this)"><i
+                        class="bi bi-chevron-up"></i></button>
+                <button class="btn btn-sm btn-light rounded-circle" onclick="moveDown(this)"><i
+                        class="bi bi-chevron-down"></i></button>
+            </div>
+        </div>
+    </div>
+</template>
+
+
+<script>
+    const COURSE_ID = {{ course.id }};
+    let QUIZ_DATA = {{ quiz_data | tojson | safe }} || [];
+    // Migration: If old items have no block_type, assume 'question'
+    QUIZ_DATA.forEach(b => { if (!b.block_type) b.block_type = 'question'; });
+
+    // Auto-Add Default Section if Empty
+    if (QUIZ_DATA.length === 0) {
+        QUIZ_DATA.push({
+            id: Date.now().toString(),
+            block_type: 'section',
+            title: 'Part 1',
+            description: 'Default Section (Cannot be deleted)',
+            locked: true
+        });
+    }
+
+    // UNDO SYSTEM
+    const HISTORY = [];
+    const MAX_HISTORY = 30;
+
+    // Upload Context
+    let UPLOAD_TARGET_IDX = -1;
+    let UPLOAD_MODE = ""; // 'image_block' or 'question_media'
+
+    function pushHistory() {
+        HISTORY.push(JSON.parse(JSON.stringify(QUIZ_DATA)));
+        if (HISTORY.length > MAX_HISTORY) HISTORY.shift();
+        updateUndoUI();
+    }
+
+    function undo() {
+        if (HISTORY.length === 0) return;
+        QUIZ_DATA = HISTORY.pop();
+        renderAll();
+        updateUndoUI();
+    }
+
+    function updateUndoUI() {
+        const btn = document.getElementById('btnUndo');
+        btn.disabled = HISTORY.length === 0;
+        btn.innerHTML = `<i class="bi bi-arrow-counterclockwise"></i> Undo (${HISTORY.length})`;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        renderAll();
+        initTooltips();
+
+        // File Input Handler
+        document.getElementById('fileUpload').addEventListener('change', async (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    // Show loading state if possible?
+                    // Simple alert for now or spinner in block?
+                    // Let's just block UI or show text?
+
+                    const res = await fetch('/admin_api/upload_media', { method: 'POST', body: formData });
+                    const val = await res.json();
+
+                    if (val.status === 'success') {
+                        // Success
+                        pushHistory(); // Undo point BEFORE applying change? Or after? Push existing first.
+                        // Actually I should have pushed before triggering upload? 
+                        // Let's pushHistory inside handleUploadSuccess logic if we want to be safe, 
+                        // but normally we push BEFORE modification. 
+                        // History already pushed by the caller of selection? No.
+                        // We'll push here.
+
+                        if (UPLOAD_MODE === 'image_block' && UPLOAD_TARGET_IDX >= 0) {
+                            QUIZ_DATA[UPLOAD_TARGET_IDX].image_url = val.url;
+                        } else if (UPLOAD_MODE === 'question_media' && UPLOAD_TARGET_IDX >= 0) {
+                            QUIZ_DATA[UPLOAD_TARGET_IDX].image_url = val.url;
+                        }
+                        renderAll();
+                    } else {
+                        alert("Upload failed: " + val.msg);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert("Upload error");
+                }
+
+                // Reset value
+                e.target.value = '';
+            }
+        });
+    });
+
+    function initTooltips() {
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        });
+    }
+
+    function activate(el) {
+        document.querySelectorAll('.block-card').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+    }
+
+    function autoResize(el) {
+        el.style.height = 'auto';
+        el.style.height = el.scrollHeight + 'px';
+    }
+
+    function renderAll() {
+        const container = document.getElementById('quizBuilder');
+        // Save scroll position or focus? Rerendering destroys focus. 
+        // For simple MVP we accept focus loss on add/delete/reorder. 
+        // On input, we update data but DONT rerender entire list unless structural change.
+        container.innerHTML = '';
+
+        if (QUIZ_DATA.length === 0) {
+            document.getElementById('emptyState').style.display = 'block';
+            return;
+        }
+        document.getElementById('emptyState').style.display = 'none';
+
+        QUIZ_DATA.forEach((block, idx) => {
+            let el;
+            if (block.block_type === 'question') el = createQuestionEl(block, idx);
+            else if (block.block_type === 'title') el = createTitleEl(block, idx);
+            else if (block.block_type === 'image') el = createImageEl(block, idx);
+            else if (block.block_type === 'video') el = createVideoEl(block, idx);
+            else if (block.block_type === 'section') el = createSectionEl(block, idx);
+
+            if (el) {
+                el.dataset.index = idx; // Store index in DOM
+                container.appendChild(el);
+            }
+        });
+
+        // Re-init tooltips for new elements if any
+        initTooltips();
+    }
+
+    // --- Block Creators ---
+
+    function createQuestionEl(data, idx) {
+        const tpl = document.getElementById('tplQuestion').content.cloneNode(true);
+        const card = tpl.querySelector('.block-card');
+
+        // Bind Inputs
+        const titleIn = card.querySelector('.q-title');
+        titleIn.value = data.title || "";
+        titleIn.oninput = (e) => updateData(idx, 'title', e.target.value);
+
+        const typeSel = card.querySelector('.q-type');
+        typeSel.value = data.type || "short_answer";
+        typeSel.dataset.index = idx;
+        typeSel.onchange = (e) => updateData(idx, 'type', e.target.value);
+
+        // Required
+        const reqCheck = card.querySelector('.q-required');
+        reqCheck.checked = !!data.required;
+        reqCheck.onchange = (e) => updateData(idx, 'required', e.target.checked);
+
+        // Media
+        const mediaDiv = card.querySelector('.q-media');
+        if (data.image_url) {
+            mediaDiv.style.display = 'block';
+            mediaDiv.querySelector('img').src = data.image_url;
+            mediaDiv.querySelector('button').onclick = () => {
+                updateData(idx, 'image_url', null);
+                renderAll();
+            };
+        }
+
+        // Content
+        const contentDiv = card.querySelector('.q-content');
+        contentDiv.innerHTML = renderQuestionContent(data, idx);
+
+        // AI Settings visibility
+        const aiDiv = card.querySelector('.q-ai-settings');
+        if (data.type === 'sentence') {
+            aiDiv.style.display = 'block';
+            const wordIn = aiDiv.querySelector('.q-ai-word');
+            wordIn.value = data.word || "";
+            wordIn.oninput = (e) => updateData(idx, 'word', e.target.value);
+
+            const meaningIn = aiDiv.querySelector('.q-ai-meaning');
+            meaningIn.value = data.meaning || "";
+            meaningIn.oninput = (e) => updateData(idx, 'meaning', e.target.value);
+
+            const storyIn = aiDiv.querySelector('.q-ai-story');
+            storyIn.value = data.story || "";
+            storyIn.oninput = (e) => updateData(idx, 'story', e.target.value);
+        } else {
+            aiDiv.style.display = 'none';
+        }
+
+        return card;
+    }
+
+    function createTitleEl(data, idx) {
+        const tpl = document.getElementById('tplTitle').content.cloneNode(true);
+        const card = tpl.querySelector('.block-card');
+        card.querySelector('.t-title').value = data.title || "";
+        card.querySelector('.t-title').oninput = (e) => updateData(idx, 'title', e.target.value);
+        card.querySelector('.t-desc').value = data.description || "";
+        card.querySelector('.t-desc').oninput = (e) => updateData(idx, 'description', e.target.value);
+        // Auto-resize textarea on load
+        setTimeout(() => autoResize(card.querySelector('.t-desc')), 0);
+        return card;
+    }
+
+    function createImageEl(data, idx) {
+        const tpl = document.getElementById('tplImage').content.cloneNode(true);
+        const card = tpl.querySelector('.block-card');
+        card.querySelector('.i-title').value = data.title || "";
+        card.querySelector('.i-title').oninput = (e) => updateData(idx, 'title', e.target.value);
+
+        const preview = card.querySelector('.media-preview');
+        const img = preview.querySelector('img');
+        const placeholder = preview.querySelector('.media-placeholder');
+
+        if (data.image_url) {
+            img.src = data.image_url;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+        }
+
+        // Helper to prompt
+        card.querySelector('.btn-outline-primary').onclick = () => promptImage(idx);
+        placeholder.onclick = () => promptImage(idx);
+
+        return card;
+    }
+
+    function createVideoEl(data, idx) {
+        const tpl = document.getElementById('tplVideo').content.cloneNode(true);
+        const card = tpl.querySelector('.block-card');
+        card.querySelector('.v-title').value = data.title || "";
+        card.querySelector('.v-title').oninput = (e) => updateData(idx, 'title', e.target.value);
+
+        const frame = card.querySelector('.video-frame');
+        const ph = card.querySelector('.media-placeholder');
+
+        if (data.video_url) {
+            frame.style.display = 'block';
+            ph.style.display = 'none';
+            // Simple replace to embed
+            let embed = data.video_url.replace("watch?v=", "embed/");
+            if (embed.indexOf("youtu.be") > -1) {
+                const id = embed.split("/").pop();
+                embed = "https://www.youtube.com/embed/" + id;
+            }
+            frame.querySelector('iframe').src = embed;
+        }
+
+        card.querySelector('.btn-outline-primary').onclick = () => promptVideo(idx);
+        ph.onclick = () => promptVideo(idx);
+        return card;
+    }
+
+    function createSectionEl(data, idx) {
+        const tpl = document.getElementById('tplSection').content.cloneNode(true);
+        const card = tpl.querySelector('.block-card');
+        card.querySelector('.s-title').value = data.title || "";
+        card.querySelector('.s-title').oninput = (e) => updateData(idx, 'title', e.target.value);
+        card.querySelector('.s-desc').value = data.description || "";
+        card.querySelector('.s-desc').oninput = (e) => updateData(idx, 'description', e.target.value);
+
+        // Locked Logic
+        if (data.locked) {
+            const delBtn = card.querySelector('.text-danger');
+            if (delBtn) delBtn.style.display = 'none'; // Hide delete button
+            // Optionally disable move or duplicate if needed, but delete is the critical one
+        }
+
+        return card;
+    }
+
+    // --- Content Renderers ---
+
+    function renderQuestionContent(q, idx) {
+        // Render different input types and the "Correct Answer" logic
+        const type = q.type || 'short_answer';
+
+        if (type === 'short_answer') return `<input class="form-control form-control-sm text-muted" disabled placeholder="Short answer text">`;
+        if (type === 'paragraph') return `<textarea class="form-control form-control-sm text-muted" disabled rows="3" placeholder="Long answer text"></textarea>`;
+        if (type === 'date') return `<input type="date" class="form-control form-control-sm text-muted" disabled>`;
+        if (type === 'time') return `<input type="time" class="form-control form-control-sm text-muted" disabled>`;
+        if (type === 'sentence') return `<textarea class="form-control form-control-sm text-muted" disabled rows="2" placeholder="Learner will write a sentence here..."></textarea>`;
+
+        // Options Based
+        if (['multiple_choice', 'checkboxes', 'dropdown'].includes(type)) {
+            let html = '<div class="vstack gap-2">';
+            (q.options || ["Option 1"]).forEach((opt, i) => {
+                let iconBase = (type === 'multiple_choice') ? 'circle' : (type === 'dropdown' ? 'list-ol' : 'square');
+                let isCorrect = (q.correct_answer === opt) || (Array.isArray(q.correct_answers) && q.correct_answers.includes(opt));
+
+                // Icon Logic: Check-Circle/Square-Fill if correct, else regular
+                let iconClass = iconBase;
+                if (isCorrect) {
+                    if (type === 'multiple_choice') iconClass = 'check-circle-fill text-success';
+                    else if (type === 'checkboxes') iconClass = 'check-square-fill text-success';
+                    else iconClass = 'check-circle-fill text-success';
+                } else {
+                    iconClass = iconBase + ' text-muted';
+                }
+
+                let checkTitle = isCorrect ? 'Correct Answer (Click to toggle)' : 'Mark as Correct';
+
+                html += `
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-${iconClass} me-2 fs-5" style="cursor:pointer;" onclick="setCorrectAnswer(${idx}, '${opt.replace(/'/g, "\\'")}')" title="${checkTitle}"></i>
+                        <input type="text" class="form-control form-control-sm me-2" value="${opt}" 
+                               oninput="updateSubArray(${idx}, 'options', ${i}, this.value)">
+                        <button class="btn btn-sm text-danger" onclick="removeSubItem(${idx}, 'options', ${i})"><i class="bi bi-x"></i></button>
+                    </div>
+                `;
+            });
+            html += `
+                <div class="d-flex align-items-center"><i class="bi bi-${type === 'multiple_choice' ? 'circle' : 'square'} me-2 text-white"></i>
+                <button class="btn btn-sm btn-link text-decoration-none p-0" onclick="addSubItem(${idx}, 'options')">Add Option</button>
+                </div></div>`;
+            return html;
+        }
+
+        // Grid / Scale (Simplification for brevity)
+        if (type === 'linear_scale') return `<div class="p-3 border rounded bg-light text-center text-muted">Linear Scale 1 to 5</div>`;
+        if (type.includes('grid')) return `<div class="p-3 border rounded bg-light text-center text-muted">Grid Rows x Columns</div>`;
+
+        return `<div>Configuration for ${type}</div>`;
+    }
+
+    // --- Actions ---
+
+    function addBlock(type) {
+        pushHistory();
+        const base = { id: Date.now().toString(), block_type: type };
+        if (type === 'question') {
+            base.title = "";
+            base.type = "multiple_choice";
+            base.options = ["Option 1"];
+        } else if (type === 'image' || type === 'video') {
+            base.title = "";
+            base.url = ""; // image_url or video_url
+        } else if (type === 'title' || type === 'section') {
+            base.title = "";
+            base.description = "";
+        }
+        QUIZ_DATA.push(base);
+        renderAll();
+        // Scroll to bottom
+        setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 100);
+    }
+
+    function updateData(idx, field, val) {
+        QUIZ_DATA[idx][field] = val;
+        // If type changes, re-render
+        if (field === 'type') renderAll();
+    }
+
+    function attachMedia(btn) {
+        // Locate index
+        const card = btn.closest('.block-card');
+        const idx = parseInt(card.dataset.index);
+
+        // Choice: URL or Upload
+        if (confirm("Click OK to Upload Image, Cancel to enter URL.")) {
+            UPLOAD_TARGET_IDX = idx;
+            UPLOAD_MODE = 'question_media';
+            pushHistory(); // Save state before upload
+            document.getElementById('fileUpload').click();
+        } else {
+            pushHistory();
+            const url = prompt("Enter Image URL:");
+            if (url) {
+                QUIZ_DATA[idx].image_url = url;
+                renderAll();
+            }
+        }
+    }
+
+    function promptImage(idx_or_el) {
+        let idx = typeof idx_or_el === 'number' ? idx_or_el : parseInt(idx_or_el.closest('.block-card').dataset.index);
+
+        if (confirm("Click OK to Upload Image, Cancel to enter URL.")) {
+            UPLOAD_TARGET_IDX = idx;
+            UPLOAD_MODE = 'image_block';
+            pushHistory();
+            document.getElementById('fileUpload').click();
+        } else {
+            pushHistory();
+            const url = prompt("Enter Image URL:");
+            if (url) {
+                QUIZ_DATA[idx].image_url = url;
+                renderAll();
+            }
+        }
+    }
+
+    function promptVideo(idx_or_el) {
+        pushHistory();
+        let idx = typeof idx_or_el === 'number' ? idx_or_el : parseInt(idx_or_el.closest('.block-card').dataset.index);
+
+        const url = prompt("Enter YouTube URL:");
+        if (url) {
+            QUIZ_DATA[idx].video_url = url;
+            renderAll();
+        }
+    }
+
+    function setCorrectAnswer(idx, optValue) {
+        pushHistory();
+        const q = QUIZ_DATA[idx];
+
+        // Ensure array exists
+        if (!q.correct_answers) {
+            // Migrate single to array if exists
+            q.correct_answers = q.correct_answer ? [q.correct_answer] : [];
+        }
+
+        // Toggle Logic for ALL types (User requested multiple answers for MCQ too)
+        if (q.correct_answers.includes(optValue)) {
+            q.correct_answers = q.correct_answers.filter(x => x !== optValue);
+        } else {
+            q.correct_answers.push(optValue);
+        }
+
+        // Sync legacy single field just in case, or clear it
+        q.correct_answer = q.correct_answers.length > 0 ? q.correct_answers[0] : null;
+
+        renderAll();
+    }
+
+    // Standard Array Helpers
+    window.updateSubArray = function (idx, arr, subIdx, val) {
+        QUIZ_DATA[idx][arr][subIdx] = val;
+    }
+    window.removeSubItem = function (idx, arr, subIdx) {
+        pushHistory();
+        QUIZ_DATA[idx][arr].splice(subIdx, 1);
+        renderAll();
+    }
+    window.addSubItem = function (idx, arr) {
+        pushHistory();
+        if (!QUIZ_DATA[idx][arr]) QUIZ_DATA[idx][arr] = [];
+        QUIZ_DATA[idx][arr].push("Option " + (QUIZ_DATA[idx][arr].length + 1));
+        renderAll();
+    }
+
+    window.deleteBlock = function (btn) {
+        // Removed confirm dialog as requested
+        const idx = parseInt(btn.closest('.block-card').dataset.index);
+
+        if (QUIZ_DATA[idx].locked) {
+            alert("This section cannot be deleted because it is required for data tracking.");
+            return;
+        }
+
+        pushHistory();
+        QUIZ_DATA.splice(idx, 1);
+        renderAll();
+    }
+
+    window.duplicateBlock = function (btn) {
+        pushHistory();
+        const idx = parseInt(btn.closest('.block-card').dataset.index);
+        const copy = JSON.parse(JSON.stringify(QUIZ_DATA[idx]));
+        copy.id = Date.now().toString();
+        QUIZ_DATA.splice(idx + 1, 0, copy);
+        renderAll();
+    }
+    window.moveUp = function (btn) {
+        pushHistory();
+        const idx = parseInt(btn.closest('.block-card').dataset.index);
+        if (idx > 0) {
+            [QUIZ_DATA[idx], QUIZ_DATA[idx - 1]] = [QUIZ_DATA[idx - 1], QUIZ_DATA[idx]];
+            renderAll();
+        }
+    }
+    window.moveDown = function (btn) {
+        pushHistory();
+        const idx = parseInt(btn.closest('.block-card').dataset.index);
+        if (idx < QUIZ_DATA.length - 1) {
+            [QUIZ_DATA[idx], QUIZ_DATA[idx + 1]] = [QUIZ_DATA[idx + 1], QUIZ_DATA[idx]];
+            renderAll();
+        }
+    }
+
+    async function saveQuiz() {
+        // ... existing save logic ...
+        const btn = document.getElementById('btnSave');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+
+        const fd = new FormData();
+        fd.append('quiz_config', JSON.stringify(QUIZ_DATA));
+
+        try {
+            const res = await fetch(`/admin_api/save_course_quiz_config/${COURSE_ID}`, {
+                method: 'POST',
+                body: fd
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> Saved';
+                setTimeout(() => { btn.innerHTML = '<i class="bi bi-save"></i> Save Changes'; btn.disabled = false; }, 1000);
+            } else {
+                alert("Error: " + data.msg);
+                btn.disabled = false;
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Save failed");
+            btn.disabled = false;
+        }
+    }
+
+    // --- CODE VIEW ---
+    let codeModal;
+    function showCodeView() {
+        if (!codeModal) codeModal = new bootstrap.Modal(document.getElementById('codeModal'));
+        const editor = document.getElementById('jsonEditor');
+        editor.value = JSON.stringify(QUIZ_DATA, null, 2);
+        codeModal.show();
+    }
+
+    function applyCodeView() {
+        const editor = document.getElementById('jsonEditor');
+        try {
+            const newData = JSON.parse(editor.value);
+            if (!Array.isArray(newData)) throw new Error("Root must be an array");
+
+            // Validation passed
+            pushHistory();
+            QUIZ_DATA = newData;
+            // Migration check just in case
+            QUIZ_DATA.forEach(b => { if (!b.block_type) b.block_type = 'question'; });
+
+            renderAll();
+            codeModal.hide();
+        } catch (e) {
+            alert("Invalid JSON: " + e.message);
+        }
+    }
+
+</script>
+{% endblock %}

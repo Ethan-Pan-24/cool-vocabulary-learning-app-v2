@@ -1,0 +1,869 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Admin Panel</h1>
+    <div>
+        <a href="/admin_api/export_csv" class="btn btn-success me-2">Export All Data (CSV)</a>
+        <a href="/admin/users" class="btn btn-info me-2">View User Data</a>
+        <a href="/courses" target="_blank" class="btn btn-warning me-2">Test User View</a>
+        <button type="button" class="btn btn-secondary me-2" onclick="openQuizSelector()">Edit Quiz Content</button>
+        <form action="/admin_api/delete_all_data" method="post" style="display: inline;">
+            <button type="submit" class="btn btn-danger"
+                onclick="return confirm('WARNING: This will delete ALL user data and enrollments. Courses and content will remain. Are you sure?')">Reset
+                User Data</button>
+        </form>
+        <button type="button" class="btn btn-outline-dark ms-2" onclick="openCourseTrash()">
+            <i class="bi bi-trash"></i> Recycle Bin
+        </button>
+        <a href="/logout" class="btn btn-outline-secondary ms-2">Logout</a>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" id="courses-tab" data-bs-toggle="tab" data-bs-target="#courses"
+            type="button">Course
+            Management</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats"
+            type="button">Analytics</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" id="image-analytics-tab" data-bs-toggle="tab" data-bs-target="#imageAnalytics"
+            type="button">Image Analytics</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" id="efficiency-tab" data-bs-toggle="tab" data-bs-target="#efficiency"
+            type="button">Teaching Efficiency</button>
+    </li>
+</ul>
+
+<div class="tab-content" id="adminTabsContent">
+    <!-- COURSE MANAGEMENT -->
+    <div class="tab-pane fade show active" id="courses" role="tabpanel">
+        <div class="row">
+            <div class="col-md-5">
+                <div class="card p-4 shadow-sm mb-4">
+                    <h4>Create New Course</h4>
+                    <form action="/admin_api/create_course" method="post">
+                        <div class="mb-3">
+                            <input type="text" name="name" class="form-control"
+                                placeholder="Course Name (e.g. English 101)" required>
+                        </div>
+                        <div class="mb-3">
+                            <textarea name="description" class="form-control" placeholder="Description"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Groups (Comma separated)</label>
+                            <input type="text" name="groups" class="form-control" value="A,B"
+                                placeholder="e.g. A, B, C or Red, Blue">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Quiz Time Limit (minutes, 0 for unlimited)</label>
+                            <input type="number" name="quiz_time_limit" class="form-control" value="5" min="0">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Create Course</button>
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-7">
+                <div class="card p-4 shadow-sm">
+                    <h4>Existing Courses</h4>
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Groups</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in courses %}
+                            <tr>
+                                <td>{{ c.id }}</td>
+                                <td>{{ c.name }}</td>
+                                <td>{{ c.group_names }}</td>
+                                <td>
+                                    <a href="/admin/course/{{ c.id }}" class="btn btn-sm btn-outline-primary me-1"
+                                        title="Manage Config">
+                                        <i class="bi bi-gear"></i> Manage
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditModal(this)"
+                                        data-id="{{ c.id }}" data-name="{{ c.name }}"
+                                        data-description="{{ c.description or '' }}"
+                                        data-groups="{{ c.group_names or '' }}" data-time="{{ c.quiz_time_limit or 5 }}"
+                                        title="Edit Name/Time">
+                                        <i class="bi bi-pencil-square"></i> Edit
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary me-1"
+                                        onclick="cloneCourse({{ c.id }})" title="Duplicate Course">
+                                        <i class="bi bi-files"></i> Copy
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger"
+                                        onclick="confirmDeleteCourse({{ c.id }}, '{{ c.name }}')" title="Delete Course">
+                                        <i class="bi bi-trash"></i> Delete
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="tab-pane fade" id="stats" role="tabpanel">
+        <div class="card p-4 shadow-sm">
+            <h4>Statistical Analysis</h4>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <select id="statsCourseId" class="form-select">
+                        {% for c in courses %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <button id="refreshStats" class="btn btn-info w-100">Analyze Course Data</button>
+                </div>
+            </div>
+
+            <div id="statsContent">
+                <p class="text-muted">Select a course and click analyze.</p>
+            </div>
+
+            <div id="plots" class="row"></div>
+        </div>
+    </div>
+
+    <!-- IMAGE ANALYTICS TAB -->
+    <div class="tab-pane fade" id="imageAnalytics" role="tabpanel">
+        <div class="card p-4 shadow-sm">
+            <h4>Image Engagement Analytics</h4>
+            <p class="text-muted">View likes, dislikes, and view statistics for all images.</p>
+
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Filter by Course</label>
+                    <select id="imageAnalyticsCourse" class="form-select">
+                        <option value="">All Courses</option>
+                        {% for c in courses %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" onclick="loadImageAnalytics()">Load Analytics</button>
+                </div>
+            </div>
+
+            <div id="imageAnalyticsTable" class="mt-3">
+                <p class="text-muted">Click "Load Analytics" to view image statistics.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- TEACHING EFFICIENCY ANALYSIS TAB (Paas 1993) -->
+    <div class="tab-pane fade" id="efficiency" role="tabpanel">
+        <div class="card p-4 shadow-sm">
+            <h4>📊 Teaching Efficiency Analysis (Paas 1993)</h4>
+            <p class="text-muted">Visualize the relationship between learning performance and mental effort using
+                Z-score standardization.</p>
+
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Select Course</label>
+                    <select id="efficiencyCourseSelect" class="form-select">
+                        <option value="">-- Select Course --</option>
+                        {% for c in courses %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" onclick="loadEfficiencyAnalysis()">Generate Analysis</button>
+                </div>
+            </div>
+
+            <div id="efficiencyResults" class="mt-4">
+                <p class="text-muted">Select a course and click "Generate Analysis" to view the efficiency quadrant
+                    plot.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TOAST NOTIFICATION -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 2000">
+    <div id="courseUndoToast" class="toast align-items-center text-white bg-dark border-0" role="alert"
+        aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body">
+                Course Deleted. <a href="#" class="text-warning fw-bold ms-2" id="undoLink"
+                    onclick="return false;">UNDO</a>
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
+                aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Course Management Logic
+    let lastDeletedCourseId = null;
+
+    function confirmDeleteCourse(id, name) {
+        if (confirm(`Delete Course: "${name}"?`)) {
+            deleteCourse(id);
+        }
+    }
+
+    async function deleteCourse(id) {
+        try {
+            const res = await fetch(`/admin_api/delete_course/${id}`, { method: 'POST' });
+            if (res.ok) {
+                // Show Toast
+                lastDeletedCourseId = id;
+                const toastEl = document.getElementById('courseUndoToast');
+                const undoLink = document.getElementById('undoLink');
+                undoLink.onclick = () => undoDeleteCourse(id);
+
+                const toast = new bootstrap.Toast(toastEl, { autohide: false });
+                toast.show();
+
+                // Reload page (or hide row)
+                // Ideally remove row nicely, but reload ensures sync
+                setTimeout(() => window.location.reload(), 500);
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    async function undoDeleteCourse(id) {
+        try {
+            const res = await fetch(`/admin_api/restore_course/${id}`, { method: 'POST' });
+            if (res.ok) {
+                window.location.reload();
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    function cloneCourse(id) {
+        if (confirm("Duplicate this course?")) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = `/admin_api/clone_course/${id}`;
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+
+    // Stats Logic
+    document.getElementById('refreshStats').onclick = async () => {
+        const btn = document.getElementById('refreshStats');
+        const courseId = document.getElementById('statsCourseId').value;
+        btn.disabled = true;
+        btn.textContent = "Processing...";
+
+        try {
+            const resp = await fetch(`/admin_api/stats?course_id=${courseId}`);
+            const data = await resp.json();
+
+            let html = '<div class="alert alert-light border">';
+            if (data.msg) {
+                html += `<p>${data.msg}</p>`;
+            } else {
+                html += '<div class="row">';
+
+                // Render stats and plots together per metric
+                const metrics = Object.keys(data.interpretations || {});
+                if (metrics.length === 0) {
+                    html += '<div class="alert alert-warning">沒有可分析的數據指標。</div>';
+                }
+
+                for (const m of metrics) {
+                    const res = data.stats ? data.stats[m] : null;
+                    const plotBase64 = data.plots ? data.plots[m] : null;
+                    const interpretation = data.interpretations[m];
+
+                    html += `<div class="col-md-12 mb-5">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0 text-capitalize text-dark fw-bold">
+                                    <i class="bi bi-pie-chart-fill text-primary me-2"></i>分項分析：${m}
+                                </h5>
+                                ${res ? `
+                                <span class="badge ${res.p_value < 0.05 ? 'bg-danger' : 'bg-secondary'}">
+                                    統計檢定 p = ${res.p_value.toFixed(4)}
+                                </span>` : '<span class="badge bg-warning text-dark">統計條件不足</span>'}
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-7">
+                                         <!-- Interpretation -->
+                                         <div class="alert ${res && res.p_value < 0.05 ? 'alert-success' : 'alert-light'} border mb-3">
+                                            <strong><i class="bi bi-info-circle-fill me-2"></i>分析結論：</strong><br>
+                                            ${interpretation}
+                                         </div>
+                                         
+                                         <!-- Detailed Stats -->
+                                         ${res ? `
+                                         <details>
+                                            <summary class="text-muted small cursor-pointer">檢視詳細統計數據</summary>
+                                            <div class="mt-2 text-muted small">
+                                                檢定方法：${res.test}<br>
+                                                統計量：${res.stat ? res.stat.toFixed(4) : 'N/A'}<br>
+                                                ${res.dunn ? `<pre class="mt-2 bg-light p-2 border rounded">事後比較 (Dunn Pairwise):\n${JSON.stringify(res.dunn, null, 2)}</pre>` : ''}
+                                            </div>
+                                         </details>` : ''}
+                                    </div>
+                                    <div class="col-md-5">
+                                        <!-- Plot -->
+                                        ${plotBase64 ? `<img src="data:image/png;base64,${plotBase64}" class="img-fluid border rounded shadow-sm" style="cursor: zoom-in;" onclick="window.open(this.src)">` : '<div class="text-center p-4 bg-light rounded text-muted">目前無法生成圖表</div>'}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+            document.getElementById('statsContent').innerHTML = html;
+            document.getElementById('plots').innerHTML = ''; // Cleared as we integrated plots above
+
+        } catch (e) {
+            alert("Error fetching stats");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Analyze Course Data";
+        }
+    };
+
+    function openQuizSelector() {
+        new bootstrap.Modal(document.getElementById('quizSelectorModal')).show();
+    }
+
+    function goToQuizEditor() {
+        const id = document.getElementById('quizSelectorInput').value;
+        if (id) window.location.href = `/admin/course/${id}/quiz_editor`;
+    }
+
+    // --- COURSE TRASH CAN LOGIC ---
+    let trashModalInstance = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const tm = document.getElementById('courseTrashModal');
+        if (tm) trashModalInstance = new bootstrap.Modal(tm);
+    });
+
+    async function openCourseTrash() {
+        if (trashModalInstance) {
+            trashModalInstance.show();
+            await loadCourseTrash();
+        }
+    }
+
+    async function loadCourseTrash() {
+        const listEl = document.getElementById('trashList');
+        listEl.innerHTML = '<div class="text-center p-3"><div class="spinner-border text-primary"></div></div>';
+
+        try {
+            const resp = await fetch(`/admin_api/get_course_trash`);
+            const data = await resp.json();
+
+            if (data.status === 'success') {
+                if (data.items.length === 0) {
+                    listEl.innerHTML = '<div class="text-center text-muted p-3">Trash is empty</div>';
+                    return;
+                }
+
+                let html = '<ul class="list-group list-group-flush">';
+                data.items.forEach(item => {
+                    html += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="fw-bold">${item.name}</span>
+                            <small class="text-muted ms-2">${item.group_names || ''}</small>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-success me-1" onclick="restoreCourseTrash(${item.id})">Restore</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteCourseTrash(${item.id})">Delete</button>
+                        </div>
+                    </li>`;
+                });
+                html += '</ul>';
+                listEl.innerHTML = html;
+            } else {
+                listEl.innerHTML = '<div class="text-danger p-3">Failed to load trash</div>';
+            }
+        } catch (e) {
+            console.error(e);
+            listEl.innerHTML = '<div class="text-danger p-3">Error loading trash</div>';
+        }
+    }
+
+    async function restoreCourseTrash(id) {
+        if (!confirm("Restore this course?")) return;
+        try {
+            const resp = await fetch(`/admin_api/restore_course/${id}`, { method: 'POST' });
+            if (resp.ok || resp.redirected) {
+                await loadCourseTrash(); // Refresh list only
+                location.reload(); // To update main list
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    async function deleteCourseTrash(id) {
+        if (!confirm("Permanently delete this course? This CANNOT be undone.")) return;
+        try {
+            const resp = await fetch(`/admin_api/permanent_delete_course/${id}`, { method: 'POST' });
+            if (resp.ok) await loadCourseTrash();
+        } catch (e) { console.error(e); }
+    }
+
+    async function emptyCourseTrash() {
+        if (!confirm("CORRECT: Delete ALL courses in trash permanently?")) return;
+        try {
+            const resp = await fetch(`/admin_api/empty_course_trash`, { method: 'POST' });
+            if (resp.ok) await loadCourseTrash();
+        } catch (e) { console.error(e); }
+    }
+    function openEditModal(btn) {
+        document.getElementById('editCourseFormModal').action = `/admin_api/update_course/${btn.dataset.id}`;
+        document.getElementById('editCourseName').value = btn.dataset.name;
+        document.getElementById('editCourseDescription').value = btn.dataset.description;
+        document.getElementById('editCourseGroups').value = btn.dataset.groups;
+        document.getElementById('editCourseTime').value = btn.dataset.time;
+
+        new bootstrap.Modal(document.getElementById('editCourseModal')).show();
+    }
+
+    // Image Analytics
+    async function loadImageAnalytics() {
+        const courseId = document.getElementById('imageAnalyticsCourse').value;
+        const url = courseId ? `/admin_api/image_analytics?course_id=${courseId}` : '/admin_api/image_analytics';
+
+        try {
+            const resp = await fetch(url);
+            const data = await resp.json();
+
+            if (!data.analytics || data.analytics.length === 0) {
+                document.getElementById('imageAnalyticsTable').innerHTML =
+                    '<p class="text-muted">No image interaction data found.</p>';
+                return;
+            }
+
+            // Render table
+            let html = `
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Image</th>
+                            <th>Word</th>
+                            <th>Chinese</th>
+                            <th class="text-center">👍🏿 Likes</th>
+                            <th class="text-center">👎🏿 Dislikes</th>
+                            <th class="text-center">👁️ Views</th>
+                            <th class="text-center">Engagement</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.analytics.forEach(item => {
+                const engagementRate = item.views > 0
+                    ? ((item.likes + item.dislikes) / item.views * 100).toFixed(1)
+                    : 0;
+                const likePercent = (item.likes + item.dislikes) > 0
+                    ? (item.likes / (item.likes + item.dislikes) * 100).toFixed(1)
+                    : 0;
+
+                html += `
+                    <tr>
+                        <td><img src="${item.image_url}" class="img-thumbnail" style="max-width:80px; max-height:60px; object-fit: cover;"></td>
+                        <td class="fw-bold">${item.word}</td>
+                        <td class="text-muted">${item.chinese || ''}</td>
+                        <td class="text-center text-success fw-bold">${item.likes}</td>
+                        <td class="text-center text-danger fw-bold">${item.dislikes}</td>
+                        <td class="text-center">${item.views} <small class="text-muted">(${item.unique_viewers} unique)</small></td>
+                        <td class="text-center">
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar bg-success" role="progressbar" style="width: ${likePercent}%" 
+                                    title="${likePercent}% positive">${engagementRate}%</div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+
+            // Add Section for Statistical Analysis
+            html += `
+                <div class="mt-5 border-top pt-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5>📊 Engagement Statistical Analysis</h5>
+                        <button class="btn btn-outline-primary btn-sm" onclick="generateEngagementAnalysis(${courseId})">
+                            <i class="bi bi-graph-up"></i> Run Statistical Analysis
+                        </button>
+                    </div>
+                    <div id="engagementAnalysisResult">
+                        <p class="text-muted small">Run analysis to compare engagement levels across groups (e.g., A/B test groups).</p>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('imageAnalyticsTable').innerHTML = html;
+        } catch (e) {
+            console.error('Failed to load image analytics', e);
+            document.getElementById('imageAnalyticsTable').innerHTML =
+                '<p class="text-danger">Error loading analytics. Please try again.</p>';
+        }
+    }
+
+    async function generateEngagementAnalysis(courseId) {
+        if (!courseId) {
+            alert("Please filter by a specific course first to run statistical analysis.");
+            return;
+        }
+
+        const target = document.getElementById('engagementAnalysisResult');
+        target.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div><p class="mt-2">Analyzing interaction data...</p></div>';
+
+        try {
+            const resp = await fetch(`/admin_api/engagement_plot?course_id=${courseId}`);
+            const data = await resp.json();
+
+            if (data.error) {
+                target.innerHTML = `<div class="alert alert-warning">${data.error}</div>`;
+                return;
+            }
+
+            const stats = data.analysis.statistics;
+            const summary = data.analysis.summary;
+
+            let html = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <img src="${data.image}" class="img-fluid border rounded shadow-sm" style="cursor: zoom-in;" onclick="window.open(this.src)">
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card shadow-sm border-0 mb-3">
+                            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0 text-dark fw-bold">Statistical Summary</h6>
+                                <span class="badge ${stats.significant ? 'bg-danger' : 'bg-secondary'}">
+                                    p = ${stats.p_value.toFixed(4)}
+                                </span>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>Test Method:</strong> ${stats.test}</p>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Group</th>
+                                                <th>N</th>
+                                                <th>Mean ER</th>
+                                                <th>Median</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${summary.map(s => `
+                                                <tr>
+                                                    <td>${s.group}</td>
+                                                    <td>${s.count}</td>
+                                                    <td>${s.mean}%</td>
+                                                    <td>${s.median}%</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                ${stats.significant ? `
+                                    <div class="alert alert-success py-2 px-3 mt-2 small">
+                                        <i class="bi bi-check-circle-fill me-1"></i> 
+                                        Significant difference detected in engagement between groups.
+                                    </div>
+                                ` : `
+                                    <div class="alert alert-light border py-2 px-3 mt-2 small text-muted">
+                                        No significant difference detected in engagement between groups.
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+                        
+                        ${stats.dunn ? `
+                            <div class="card shadow-sm border-0">
+                                <div class="card-header bg-warning py-1"><small class="fw-bold">Pairwise Comparisons (Dunn)</small></div>
+                                <div class="card-body p-0">
+                                    <table class="table table-sm table-hover mb-0 small text-center">
+                                        <thead><tr><th>Groups</th><th>p-value</th><th>Sig.</th></tr></thead>
+                                        <tbody>
+                                            ${stats.dunn.map(d => `
+                                                <tr>
+                                                    <td>${d.group1} vs ${d.group2}</td>
+                                                    <td>${d.p_value}</td>
+                                                    <td>${d.significant ? '✅' : '-'}</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+            target.innerHTML = html;
+        } catch (e) {
+            console.error(e);
+            target.innerHTML = '<div class="alert alert-danger">Failed to generate engagement analysis.</div>';
+        }
+    }
+
+    // Teaching Efficiency Analysis (Paas 1993)
+    async function loadEfficiencyAnalysis() {
+        const courseId = document.getElementById('efficiencyCourseSelect').value;
+
+        if (!courseId) {
+            alert('Please select a course first.');
+            return;
+        }
+
+        const resultsDiv = document.getElementById('efficiencyResults');
+        resultsDiv.innerHTML = '<p class="text-muted"><i class="spinner-border spinner-border-sm"></i> Generating analysis...</p>';
+
+        try {
+            // Fetch plot and statistics
+            const resp = await fetch(`/admin_api/efficiency_plot?course_id=${courseId}`);
+            const data = await resp.json();
+
+            if (data.error) {
+                resultsDiv.innerHTML = `<p class="text-danger">${data.error}</p>`;
+                return;
+            }
+
+            let html = '';
+            const sections = Object.keys(data.sections).sort((a, b) => {
+                if (a === 'Overall') return -1;
+                if (b === 'Overall') return 1;
+                return a.localeCompare(b);
+            });
+
+            sections.forEach(secName => {
+                const secData = data.sections[secName];
+                const stats = secData.statistics;
+
+                html += `
+                    <div class="section-analysis mb-5 p-4 border rounded shadow-sm bg-light">
+                        <h3 class="mb-4 border-bottom pb-2">📂 Section: ${secName}</h3>
+                        
+                        <!-- 1. Plot -->
+                        <div class="mb-4">
+                            <h5>Efficiency Quadrant & Distribution</h5>
+                            <img src="${secData.image}" class="img-fluid border rounded shadow-sm" style="max-width: 100%;">
+                        </div>
+
+                        <!-- 2. Descriptive Stats -->
+                        ${stats.descriptive ? `
+                            <div class="card mb-3">
+                                <div class="card-header bg-primary text-white">
+                                    <h6 class="mb-0">📈 Descriptive Statistics (Overall)</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <p><strong>Performance:</strong> Mean ${stats.descriptive.M_performance}% | SD ${stats.descriptive.SD_performance}%</p>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <p><strong>Mental Effort:</strong> Mean ${stats.descriptive.M_effort} | SD ${stats.descriptive.SD_effort}</p>
+                                        </div>
+                                    </div>
+                                    <p class="mb-0 small text-muted">Total Students: ${stats.descriptive.total_students} | Groups: ${stats.descriptive.num_groups}</p>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        <!-- 3. Table IV -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-secondary text-white">
+                                <h6 class="mb-0">TABLE IV. Descriptive Statistics By Group (${secName})</h6>
+                            </div>
+                            <div class="card-body p-0">
+                                <table class="table table-sm table-striped mb-0 text-center">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Group</th>
+                                            <th>N</th>
+                                            <th>Mental (Mean)</th>
+                                            <th>Perf (Mean)</th>
+                                            <th>Efficiency (Mean)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${secData.group_averages.map(g => `
+                                            <tr>
+                                                <td>${g.group}</td>
+                                                <td>${g.count}</td>
+                                                <td>${g.Z_R_mean}</td>
+                                                <td>${g.Z_P_mean}</td>
+                                                <td><strong>${g.E_mean}</strong></td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 4. Statistical Tests -->
+                        ${(stats.wilcoxon || stats.kruskal_wallis) ? (() => {
+                        const isW = !!stats.wilcoxon;
+                        const t = isW ? stats.wilcoxon : stats.kruskal_wallis;
+                        const title = isW ? 'Wilcoxon Rank-Sum Test' : 'Kruskal-Wallis Test';
+                        const badge = t.significant ? '<span class="badge bg-success">Significant</span>' : '<span class="badge bg-secondary">n.s.</span>';
+                        return `
+                                <div class="card mb-3">
+                                    <div class="card-header bg-info text-white">
+                                        <h6 class="mb-0">🧪 ${title}</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <p>Result: <strong>${isW ? 'U=' + t.U : 'H=' + t.H}</strong> | p-value: <strong>${t.p}</strong> ${badge}</p>
+                                    </div>
+                                </div>
+                            `;
+                    })() : ''}
+
+                        <!-- 5. Dunn's Post-Hoc -->
+                        ${(stats.dunn && stats.dunn.length > 0) ? `
+                            <div class="card mb-3">
+                                <div class="card-header bg-warning">
+                                    <h6 class="mb-0">🔍 Dunn's Post-Hoc Test (Bonferroni Correction)</h6>
+                                </div>
+                                <div class="card-body">
+                                    <table class="table table-sm table-hover mb-0">
+                                        <thead><tr><th>Comparison</th><th>p-value</th><th>Result</th></tr></thead>
+                                        <tbody>
+                                            ${stats.dunn.map(c => `
+                                                <tr>
+                                                    <td>Group ${c.group1} vs ${c.group2}</td>
+                                                    <td>${c.p_value}</td>
+                                                    <td>${c.significant ? 'Significant' : 'n.s.'}</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        ${stats.error ? `<div class="alert alert-warning py-2 small"><strong>Warning:</strong> ${stats.error}</div>` : ''}
+                    </div>
+                `;
+            });
+
+            resultsDiv.innerHTML = html;
+        } catch (e) {
+            console.error('Failed to load efficiency analysis', e);
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <p class="mb-1"><strong>Error generating analysis:</strong> ${e.message}</p>
+                    <p class="small mb-0 text-muted">Please check the server logs or try again. If the issue persists, the data might be insufficient for some sections.</p>
+                </div>
+            `;
+        }
+    }
+</script>
+
+<!-- COURSE TRASH CAN MODAL -->
+<div class="modal fade" id="courseTrashModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title"><i class="bi bi-trash3"></i> Course Recycle Bin</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0" id="trashList" style="min-height: 200px;">
+                <!-- Content -->
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-outline-danger btn-sm me-auto" onclick="emptyCourseTrash()">Empty
+                    Trash</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- QUIZ SELECTOR MODAL -->
+<div class="modal fade" id="quizSelectorModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Select Course to Edit Quiz</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Choose a course to open its Quiz Editor:</p>
+                <select class="form-select" id="quizSelectorInput">
+                    {% for c in courses %}
+                    <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="goToQuizEditor()">Go to Editor</button>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+</div>
+<!-- EDIT COURSE SETTINGS MODAL -->
+<div class="modal fade" id="editCourseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> Edit Course Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editCourseFormModal" method="post">
+                <input type="hidden" name="redirect_to" value="/admin">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Course Name</label>
+                        <input type="text" name="name" id="editCourseName" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea name="description" id="editCourseDescription" class="form-control"
+                            rows="2"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-8 mb-3">
+                            <label class="form-label">Groups (e.g. A,B)</label>
+                            <input type="text" name="groups" id="editCourseGroups" class="form-control">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Quiz Time (min)</label>
+                            <input type="number" name="quiz_time_limit" id="editCourseTime" class="form-control"
+                                min="0">
+                        </div>
+                    </div>
+                    <p class="small text-muted mb-0">Note: Setting Quiz Time to 0 means no time limit.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

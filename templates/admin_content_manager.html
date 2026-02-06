@@ -1,0 +1,1751 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<style>
+    /* EXPLORER STYLES */
+    :root {
+        --folder-color: #f8d775;
+        --file-color: #e2e6ea;
+        --selected-bg: #cce8ff;
+        --selected-border: #99d1ff;
+    }
+
+    .explorer-container {
+        height: calc(100vh - 150px);
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        background: #fff;
+    }
+
+    /* BREADCRUMBS */
+    .explorer-toolbar {
+        padding: 0.5rem;
+        background: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .breadcrumb-item {
+        cursor: pointer;
+        color: #0d6efd;
+    }
+
+    .breadcrumb-item:hover {
+        text-decoration: underline;
+    }
+
+    .breadcrumb-item.active {
+        color: #6c757d;
+        cursor: default;
+        text-decoration: none;
+    }
+
+    /* GRID VIEW */
+    .explorer-view {
+        flex: 1;
+        padding: 1rem;
+        overflow-y: auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        grid-auto-rows: min-content;
+        gap: 1rem;
+        align-content: start;
+        position: relative;
+        /* For marquee */
+        user-select: none;
+    }
+
+    /* ITEMS */
+    .explorer-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 0.5rem;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: default;
+        transition: background 0.1s;
+        text-align: center;
+        width: 100px;
+    }
+
+    .explorer-item:hover {
+        background: #f1f3f5;
+    }
+
+    .explorer-item.selected {
+        background: var(--selected-bg);
+        border-color: var(--selected-border);
+    }
+
+    .explorer-item.cut-mode {
+        opacity: 0.5;
+    }
+
+    .item-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.25rem;
+        color: var(--file-color);
+        pointer-events: none;
+    }
+
+    .item-icon.folder {
+        color: var(--folder-color);
+    }
+
+    .item-icon.file {
+        color: #6c757d;
+        font-size: 2rem;
+    }
+
+    /* File Types */
+    .file-word {
+        color: #0dcaf0;
+    }
+
+    .item-label {
+        font-size: 0.8rem;
+        word-break: break-word;
+        line-height: 1.2;
+        max-width: 100%;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        pointer-events: none;
+    }
+
+    /* MARQUEE SELECTION */
+    #selectionMarquee {
+        position: absolute;
+        border: 1px solid #0d6efd;
+        background: rgba(13, 110, 253, 0.2);
+        display: none;
+        pointer-events: none;
+        z-index: 100;
+    }
+
+    /* CONTEXT MENU */
+    #contextMenu {
+        position: absolute;
+        display: none;
+        background: #fff;
+        border: 1px solid #ccc;
+        box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+        z-index: 1000;
+        min-width: 150px;
+        border-radius: 4px;
+        padding: 4px 0;
+    }
+
+    .ctx-item {
+        padding: 4px 16px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        display: block;
+        color: #212529;
+        text-decoration: none;
+    }
+
+    .ctx-item:hover {
+        background: #0d6efd;
+        color: #fff;
+    }
+
+    .ctx-separator {
+        border-top: 1px solid #dee2e6;
+        margin: 4px 0;
+    }
+
+    .ctx-item.disabled {
+        color: #adb5bd;
+        pointer-events: none;
+    }
+
+    /* TOAST */
+    .toast-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 2000;
+    }
+</style>
+
+<div class="container-fluid mt-3">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4 class="mb-0">
+            <i class="bi bi-folder2-open"></i> Content Explorer: {{ course.name }}
+        </h4>
+        <div>
+            <a href="/admin" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Back to Courses
+            </a>
+        </div>
+    </div>
+
+    <!-- MAIN EXPLORER UI -->
+    <div class="explorer-container" id="explorerContainer">
+        <!-- Toolbar / Breadcrumbs -->
+        <div class="explorer-toolbar">
+            <button class="btn btn-sm btn-light border" onclick="fs.goUp()" title="Up one level">
+                <i class="bi bi-arrow-up-short"></i> Up Level
+            </button>
+            <div id="breadcrumbs" class="d-flex align-items-center gap-1 ms-2 small">
+                <!-- JS Populated -->
+            </div>
+            <div class="ms-auto d-flex gap-2">
+                <button class="btn btn-sm btn-outline-danger" onclick="openTrashCan()">
+                    <i class="bi bi-trash3"></i> Recycle Bin
+                </button>
+                <div class="vr"></div>
+                <button class="btn btn-sm btn-outline-warning" onclick="undoLastAction()" id="btnGlobalUndo" disabled>
+                    <i class="bi bi-arrow-counterclockwise"></i> Undo
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="createNewFolder()" id="btnNewFolder" disabled>
+                    <i class="bi bi-folder-plus"></i> New Stage
+                </button>
+                <button class="btn btn-sm btn-primary" onclick="createNewVocab()" id="btnNewFile" disabled>
+                    <i class="bi bi-file-earmark-plus"></i> New Word
+                </button>
+            </div>
+        </div>
+
+        <!-- Grid View -->
+        <div class="explorer-view" id="fileView">
+            <!-- JS Populated Items -->
+
+            <!-- Marquee Selection Box -->
+            <div id="selectionMarquee"></div>
+        </div>
+    </div>
+
+</div>
+
+<!-- TOAST NOTIFICATION -->
+<div class="toast-container">
+    <div id="undoToast" class="toast align-items-center text-white bg-dark border-0" role="alert" aria-live="assertive"
+        aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body">
+                Item Deleted. <a href="#" class="text-warning fw-bold ms-2"
+                    onclick="undoLastAction(); return false;">UNDO</a>
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
+                aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<!-- CONTEXT MENU -->
+<div id="contextMenu">
+    <div class="ctx-item" onclick="cm.newWord()" id="ctxNewWord">New Word</div>
+    <div class="ctx-item" onclick="cm.newStage()" id="ctxNewStage">New Stage</div>
+    <div class="ctx-item" onclick="cm.newGroup()" id="ctxNewGroup">New Group</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" onclick="cm.copy()">Copy</div>
+    <div class="ctx-item" onclick="cm.cut()">Cut</div>
+    <div class="ctx-item" onclick="cm.paste()" id="ctxPaste">Paste</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" onclick="cm.delete()">Delete</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" onclick="cm.open()">Open / Edit</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" onclick="cm.rename()" id="ctxRename">Rename</div>
+</div>
+
+<!-- MODALS -->
+<!-- ADD WORD MODAL -->
+<div class="modal fade" id="addWordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Word</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addWordForm" action="/admin_api/add_word" method="post" enctype="multipart/form-data"
+                onsubmit="handleAddSubmit(event)">
+                <div class="modal-body">
+                    <input type="hidden" name="course_id" value="{{ course.id }}">
+                    <input type="hidden" name="stage" id="addModalStage">
+                    <input type="hidden" name="group" id="addModalGroup">
+                    <input type="hidden" name="display_order" value="999">
+                    <input type="hidden" name="redirect_to" value="content_manager">
+
+                    <div class="mb-2">
+                        <label class="form-label small">Word</label>
+                        <input type="text" name="word" class="form-control" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Meaning (Chinese)</label>
+                        <input type="text" name="chinese" class="form-control" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Story</label>
+                        <textarea name="story" class="form-control" rows="3" required></textarea>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small">Image (URL or File)</label>
+                        <input type="text" name="image" class="form-control mb-1" placeholder="http://...">
+                        <input type="file" name="image_file" class="form-control" accept="image/*">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Audio (File)</label>
+                        <input type="file" name="audio_file" class="form-control" accept="audio/*">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary">Add Word</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- EDIT WORD MODAL -->
+<div class="modal fade" id="editWordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Word</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="#" method="post" enctype="multipart/form-data" id="editWordForm"
+                onsubmit="handleEditSubmit(event)">
+                <div class="modal-body">
+                    <input type="hidden" name="vocab_id" id="editVocabId">
+                    <input type="hidden" name="redirect_to" value="content_manager">
+                    <!-- Required fields for update_vocab to prevent moving -->
+                    <input type="hidden" name="course_id" id="editWordCourseId">
+                    <input type="hidden" name="group" id="editWordGroup">
+                    <input type="hidden" name="stage" id="editWordStage">
+                    <input type="hidden" name="display_order" id="editWordOrder">
+
+                    <div class="mb-2">
+                        <label class="form-label small">Word</label>
+                        <input type="text" name="word" id="editWordWord" class="form-control" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Meaning</label>
+                        <input type="text" name="chinese" id="editWordChinese" class="form-control" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Story</label>
+                        <textarea name="story" id="editWordStory" class="form-control" rows="3" required></textarea>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small">Current Image</label>
+                        <input type="text" name="image" id="editWordImage" class="form-control mb-1">
+                        <img id="editWordImagePreview" src="" class="img-thumbnail mb-1"
+                            style="max-height: 150px; display: none;">
+                        <input type="file" name="image_file" class="form-control" accept="image/*">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">Audio (File)</label>
+                        <input type="file" name="audio_file" class="form-control" accept="audio/*">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger me-auto" onclick="deleteCurrentWord()">Delete</button>
+                    <button type="submit" class="btn btn-success">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+</div>
+</div>
+
+<!-- DATA INJECTION -->
+<script>
+    const COURSE_ID = {{ course.id }};
+    // Full Config: {"Group A": [{"name": "S1"}], "Group B": ...}
+    let RAW_STAGE_CONFIG = {{ full_stage_config | tojson | safe }};
+    if (Array.isArray(RAW_STAGE_CONFIG)) {
+        // Migration support for legacy List format
+        RAW_STAGE_CONFIG = { "Common": RAW_STAGE_CONFIG };
+    }
+    const STAGE_CONFIG = RAW_STAGE_CONFIG || {};
+    // Groups List: ["Group A", "Group B"]
+    const GROUP_NAMES = {{ groups | tojson | safe }} || [];
+    // Vocab List: [{id, word, group, stage...}]
+    const ALL_VOCAB = {{ vocab_list | tojson | safe }} || [];
+</script>
+
+<!-- APPLICATION LOGIC -->
+<script>
+    /**
+     * VIRTUAL FILE SYSTEM
+     * Maps the flat data structure into a hierarchical Folder/File tree.
+     * Levels: Root -> Group (Folder) -> Stage (Folder) -> Vocab (File)
+     */
+    class VirtualFS {
+        constructor() {
+            this.currentPath = []; // ["Group Name", "Stage Name"]
+        }
+
+        // Get current contents based on path
+        ls() {
+            if (this.currentPath.length === 0) {
+                // ROOT: Show Groups
+                return {
+                    type: 'root',
+                    items: GROUP_NAMES.map(g => ({ type: 'folder', name: g, subtype: 'group' }))
+                };
+            }
+
+            const groupName = this.currentPath[0];
+
+            if (this.currentPath.length === 1) {
+                // GROUP LEVEL: Show Stages
+                // Get stages from config or default
+                let stages = STAGE_CONFIG[groupName] || STAGE_CONFIG["Common"];
+
+                // Handle legacy list if needed (should be dict by now, but safety check)
+                if (Array.isArray(STAGE_CONFIG)) stages = STAGE_CONFIG;
+
+                const stageItems = (stages || []).map(s => ({ type: 'folder', name: s.name, subtype: 'stage' }));
+
+                // Allow navigating to "Unassigned" manually? Maybe just auto-show it.
+                stageItems.unshift({ type: 'folder', name: 'Unassigned', subtype: 'stage' });
+
+                return {
+                    type: 'group',
+                    items: stageItems
+                };
+            }
+
+            if (this.currentPath.length === 2) {
+                // STAGE LEVEL: Show Words
+                const stageName = this.currentPath[1];
+
+                // Filter Vocab
+                const files = ALL_VOCAB.filter(v => {
+                    if (v.is_deleted) return false; // Hide deleted
+
+                    const gMatch = (v.group === groupName) || (groupName === "Common" && v.group === "Common");
+                    // Note: If inside a specific group folder, should show "Common" words? 
+                    // Logic: "Common" is a Group. "Group A" is a Group.
+                    // If I am in Group A -> Stage 1, I expect to see words assigned to Group A + Stage 1. 
+
+                    const sMatch = (v.stage || "Unassigned") === stageName;
+
+                    // Allow browsing "All" content?
+                    // Let's stick to strict: group match AND stage match.
+                    return (v.group === groupName) && sMatch;
+                });
+
+                return {
+                    type: 'stage',
+                    items: files.map(f => ({
+                        type: 'file',
+                        name: f.word,
+                        id: f.id,
+                        data: f
+                    }))
+                };
+            }
+
+            return { type: 'empty', items: [] };
+        }
+
+        cd(folderName) {
+            this.currentPath.push(folderName);
+            render();
+        }
+
+        goUp() {
+            if (this.currentPath.length > 0) {
+                this.currentPath.pop();
+                render();
+            }
+        }
+
+        goTo(index) {
+            // Go to specific path index (for breadcrumbs)
+            this.currentPath = this.currentPath.slice(0, index + 1);
+            render();
+        }
+
+        goRoot() {
+            this.currentPath = [];
+            render();
+        }
+    }
+
+    const fs = new VirtualFS();
+
+    /**
+     * SELECTION & INTERACTION MANAGER
+     */
+    class SelectionState {
+        constructor() {
+            this.selectedIds = new Set(); // Stores IDs for files, Names for folders (prefix with type?)
+            // Actually, let's store unique keys: "folder:Name" or "file:ID"
+            this.lastSelectedKey = null; // For Shift-click
+        }
+
+        clear() {
+            this.selectedIds.clear();
+            this.lastSelectedKey = null;
+            updateSelectionVisuals();
+        }
+
+        select(key, multiConfig) {
+            // multiConfig: { ctrl: bool, shift: bool }
+            if (!multiConfig.ctrl && !multiConfig.shift) {
+                this.selectedIds.clear();
+            }
+
+            if (multiConfig.shift && this.lastSelectedKey) {
+                // Range select (simplified: select everything visual between last and current)
+                // Need reference to DOM order... ignoring for basic MVP, just treat as add
+                this.selectedIds.add(key);
+            } else if (multiConfig.ctrl) {
+                // Toggle
+                if (this.selectedIds.has(key)) this.selectedIds.delete(key);
+                else this.selectedIds.add(key);
+            } else {
+                this.selectedIds.add(key);
+            }
+
+            this.lastSelectedKey = key;
+            updateSelectionVisuals();
+        }
+
+        add(key) {
+            this.selectedIds.add(key);
+            updateSelectionVisuals();
+        }
+
+        // Returns list of selected objects (files/folders)
+        getSelectedItems() {
+            const els = document.querySelectorAll('.explorer-item');
+            const selected = [];
+            els.forEach(el => {
+                if (this.selectedIds.has(el.dataset.key)) {
+                    selected.push({
+                        key: el.dataset.key,
+                        type: el.dataset.type,
+                        data: el.dataset.json ? JSON.parse(el.dataset.json) : null,
+                        name: el.dataset.name,
+                        subtype: el.dataset.subtype,
+                        ...(el.dataset.json ? JSON.parse(el.dataset.json) : {}),
+                        parentGroup: fs.currentPath[0] || null, // Capture context for Stages
+                        course_id: COURSE_ID // Tag items with origin course
+                    });
+                }
+            });
+            return selected;
+        }
+    }
+
+    const sel = new SelectionState();
+
+    // Clipboard with Persistence
+    const clipboard = {
+        items: [], // [{type: 'file', id: 123}, ...]
+        mode: null, // "copy" or "cut"
+
+        init() {
+            const stored = sessionStorage.getItem('cm_clipboard');
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    this.items = parsed.items || [];
+                    this.mode = parsed.mode || null;
+                } catch (e) { console.error(e); }
+            }
+        },
+
+        set(items, mode) {
+            this.items = items;
+            this.mode = mode;
+            // Persist
+            sessionStorage.setItem('cm_clipboard', JSON.stringify({ items, mode }));
+            console.log(`Clipboard: ${items.length} items (${mode})`);
+        },
+
+        clear() {
+            this.items = [];
+            this.mode = null;
+            sessionStorage.removeItem('cm_clipboard');
+        },
+
+        async paste() {
+            if (this.items.length === 0) return;
+
+            const isFolderOps = this.items.length > 0 && this.items[0].type === 'folder';
+
+            // --- FOLDER PASTE ---
+            if (isFolderOps) {
+                // Must be at Root (for Group paste) or Group (for Stage paste)
+                const targetGroup = fs.currentPath[0];
+
+                // Validate Context
+                const itemSubtype = this.items[0].subtype;
+
+                if (itemSubtype === 'group' && fs.currentPath.length !== 0) {
+                    alert("Groups can only be pasted at the Root level.");
+                    return;
+                }
+                if (itemSubtype === 'stage' && fs.currentPath.length !== 1) {
+                    alert("Stages can only be pasted inside a Group.");
+                    return;
+                }
+
+                // Call paste_folder (or clone endpoints)
+                for (const item of this.items) {
+                    const srcCourse = item.course_id || COURSE_ID;
+                    const isCrossCourse = (srcCourse != COURSE_ID);
+
+                    const formData = new FormData();
+                    formData.append('source_course_id', srcCourse);
+                    formData.append('target_course_id', COURSE_ID);
+
+                    if (itemSubtype === 'group') {
+                        // Group Paste
+                        const targetGpName = item.name + (isCrossCourse || this.mode === 'copy' ? (isCrossCourse ? "" : " Copy") : "");
+
+                        formData.append('source_group', item.name);
+                        formData.append('target_group', targetGpName);
+
+                        // 1. Clone
+                        const res = await fetch('/admin_api/clone_group_content', { method: 'POST', body: formData });
+
+                        // 2. If CUT, delete original
+                        if (res.ok && this.mode === 'cut') {
+                            const delFD = new FormData();
+                            delFD.append('course_id', item.course_id || COURSE_ID);
+                            delFD.append('group_name', item.name);
+                            await fetch('/admin_api/delete_group', { method: 'POST', body: delFD });
+                        }
+
+                    } else if (itemSubtype === 'stage') {
+                        // Stage Paste
+                        const targetStName = item.name + (isCrossCourse || this.mode === 'copy' ? (isCrossCourse ? "" : " Copy") : "");
+
+                        formData.append('source_group', item.parentGroup || "Common");
+                        formData.append('source_stage', item.name);
+                        formData.append('target_group', targetGroup);
+                        formData.append('target_stage', targetStName);
+
+                        // 1. Clone
+                        const res = await fetch('/admin_api/clone_stage_content', { method: 'POST', body: formData });
+
+                        // 2. If CUT, delete original
+                        if (res.ok && this.mode === 'cut') {
+                            const delFD = new FormData();
+                            delFD.append('course_id', item.course_id || COURSE_ID);
+                            delFD.append('group_name', item.parentGroup || "Common");
+                            delFD.append('stage_name', item.name);
+                            await fetch('/admin_api/delete_stage', { method: 'POST', body: delFD });
+                        }
+                    }
+
+                    // UNDO PREPARATION
+                    // We need to know what to "undo". 
+                    // If Copy: Undo is DELETE the new Thing.
+                    // If Cut: Undo is DELETE new Thing + RESTORE old Thing.
+
+                    const undoAction = {
+                        type: 'composite', // Use composite to handle complex folder ops
+                        folders: [],    // To restore (for Cut undo)
+                        deletions: []   // To delete (for Copy/Cut undo - cleanup new items)
+                    };
+
+                    // Name of the NEW item we just created
+                    const newName = (itemSubtype === 'group')
+                        ? (item.name + (isCrossCourse || this.mode === 'copy' ? (isCrossCourse ? "" : " Copy") : ""))
+                        : (item.name + (isCrossCourse || this.mode === 'copy' ? (isCrossCourse ? "" : " Copy") : "")); // Suffix logic same above
+
+                    // The "Undo" action for this operation is usually:
+                    // 1. Delete the new folder we just made.
+                    // 2. (If Cut) Restore the old folder we just deleted.
+
+                    // Since 'undoLastAction' handles 'composite' by RESTORING, we need a specialized handling?
+                    // Actually, 'undoLastAction' is "Revert this action".
+                    // If action was 'paste_file' (copy), we delete.
+                    // If action was 'paste_folder' (copy), we should delete.
+
+                    // Let's create a new type 'paste_folder' to avoid confusion
+                    const pasteAction = {
+                        type: 'paste_folder',
+                        subtype: itemSubtype,
+                        mode: this.mode,
+                        // Info about the NEW item (to delete on Undo)
+                        newGroup: (itemSubtype === 'group') ? newName : targetGroup,
+                        newStage: (itemSubtype === 'stage') ? newName : null,
+                        // Info about the OLD item (to restore on Undo Cut)
+                        originalItem: item,
+                        originalSource: {
+                            course_id: item.course_id || COURSE_ID,
+                            group: (itemSubtype === 'stage') ? (item.parentGroup || "Common") : item.name,
+                            stage: item.name
+                        }
+                    };
+                    showUndoToast(pasteAction);
+                }
+                reloadAndRestore();
+                if (this.mode === 'cut') this.clear(); // Clear after cut?
+            } else {
+                // --- FILE PASTE ---
+                // Only allowed in Stage
+                if (fs.currentPath.length !== 2) {
+                    alert("Words can only be pasted inside a Stage.");
+                    return;
+                }
+
+                const targetGroup = fs.currentPath[0];
+                const targetStage = fs.currentPath[1];
+                const sourceIds = this.items.map(i => i.id);
+
+                const fd = new FormData();
+                sourceIds.forEach(id => fd.append('source_ids', id));
+                fd.append('operation', this.mode);
+                fd.append('target_course_id', COURSE_ID);
+                fd.append('target_group', targetGroup);
+                fd.append('target_stage', targetStage);
+
+                try {
+                    const res = await fetch('/admin_api/paste_content', { method: 'POST', body: fd });
+                    const data = await res.json();
+
+                    if (data.status === 'success') {
+                        // Add to Undo Stack
+                        // For Cut: we need to know where they came from. 
+                        // luckily existing "this.items" has metadata when read from 'sel'
+                        // {id, type, group, stage, course_id, ...} derived from 'data' or explicit props
+                        // Let's ensure 'this.items' has this.
+                        const undoAction = {
+                            type: 'paste_file',
+                            mode: this.mode,
+                            ids: data.ids, // The IDs of items now in the new location (newly created or moved)
+                            original_items: this.items // Snapshot of source
+                        };
+                        showUndoToast(undoAction);
+
+                        reloadAndRestore();
+                        if (this.mode === 'cut') this.clear();
+                    } else {
+                        alert("Paste failed: " + data.msg);
+                    }
+                } catch (e) { console.error(e); }
+            }
+        }
+    };
+
+
+    const cm = {
+        menu: document.getElementById('contextMenu'),
+
+        show(x, y) {
+            this.menu.style.left = x + 'px';
+            this.menu.style.top = y + 'px';
+            this.menu.style.display = 'block';
+
+            // 1. New Word / New Stage Visibility
+            const btnNewWord = document.getElementById('ctxNewWord');
+            const btnNewStage = document.getElementById('ctxNewStage');
+
+            if (fs.currentPath.length === 2) { // Inside Group -> Stage
+                btnNewWord.style.display = 'block';
+                btnNewStage.style.display = 'none';
+            } else if (fs.currentPath.length === 1) { // Inside Group
+                btnNewWord.style.display = 'none';
+                btnNewStage.style.display = 'block';
+            } else { // Root
+                btnNewWord.style.display = 'none';
+                btnNewStage.style.display = 'none';
+            }
+
+            // 2. Enable/Disable paste
+            const pasteBtn = document.getElementById('ctxPaste');
+            // Logic: Enable if clipboard has content AND we are in correct context
+            let canPaste = false;
+            if (clipboard.items.length > 0) {
+                const cbItem = clipboard.items[0];
+                if (cbItem.type === 'file') {
+                    // Can only paste files in Stage (Len 2)
+                    if (fs.currentPath.length === 2) canPaste = true;
+                } else if (cbItem.type === 'folder') {
+                    // Can paste Group at Root (Len 0)
+                    if (cbItem.subtype === 'group' && fs.currentPath.length === 0) canPaste = true;
+                    // Can paste Stage at Group (Len 1)
+                    if (cbItem.subtype === 'stage' && fs.currentPath.length === 1) canPaste = true;
+                }
+            }
+
+            if (canPaste) {
+                pasteBtn.classList.remove('disabled');
+            } else {
+                pasteBtn.classList.add('disabled');
+            }
+
+            // 3. Enable/Disable Rename
+            const renameBtn = document.getElementById('ctxRename');
+            const selected = sel.getSelectedItems();
+
+            // Allow renaming Group (Root level folder) OR Stage (Group level folder)
+            // Cannot rename Root/Empty or File via this logic (Files have Edit Modal)
+            let canRename = false;
+
+            if (selected.length === 1 && selected[0].type === 'folder') {
+                if (selected[0].name === 'Unassigned') {
+                    canRename = false;
+                } else if (fs.currentPath.length === 0 && selected[0].subtype === 'group') {
+                    // Rename Group
+                    canRename = true;
+                } else if (fs.currentPath.length === 1 && selected[0].subtype === 'stage') {
+                    // Rename Stage
+                    canRename = true;
+                }
+            }
+
+            if (canRename) {
+                renameBtn.classList.remove('disabled');
+            } else {
+                renameBtn.classList.add('disabled');
+            }
+        },
+
+        hide() {
+            this.menu.style.display = 'none';
+        },
+
+        newWord() {
+            this.hide();
+            createNewVocab();
+        },
+
+        newStage() {
+            this.hide();
+            createNewFolder();
+        },
+
+        newGroup() {
+            this.hide();
+            const name = prompt("New Group Name:", "Group " + (GROUP_NAMES.length + 1));
+            if (name) {
+                const formData = new FormData();
+                formData.append('course_id', COURSE_ID);
+                formData.append('group_name', name);
+                fetch('/admin_api/add_group', { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            reloadAndRestore();
+                        } else {
+                            alert("Error: " + data.msg);
+                        }
+                    })
+                    .catch(e => console.error(e));
+            }
+        },
+
+        copy() {
+            clipboard.set(sel.getSelectedItems(), 'copy');
+            this.hide();
+        },
+
+        cut() {
+            clipboard.set(sel.getSelectedItems(), 'cut');
+            // Add visual style 'cut-mode' to elements
+            document.querySelectorAll('.explorer-item.selected').forEach(el => el.classList.add('cut-mode'));
+            this.hide();
+        },
+
+        rename() {
+            const item = sel.getSelectedItems()[0];
+            if (!item) return;
+
+            if (item.subtype === 'group') {
+                const newName = prompt("Rename Group:", item.name);
+                if (newName && newName !== item.name) {
+                    const formData = new FormData();
+                    formData.append('course_id', COURSE_ID);
+                    formData.append('old_name', item.name);
+                    formData.append('new_name', newName);
+
+                    fetch('/admin_api/rename_group', { method: 'POST', body: formData })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                reloadAndRestore();
+                            } else {
+                                alert('Rename failed');
+                            }
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            alert('Error renaming group');
+                        });
+                }
+            } else if (item.subtype === 'stage') {
+                const newName = prompt("Rename Stage:", item.name);
+                if (newName && newName !== item.name) {
+                    updateStageName(item.name, newName);
+                }
+            }
+            this.hide();
+        },
+
+        paste() { clipboard.paste(); this.hide(); },
+
+        async delete() {
+            this.hide();
+            const items = sel.getSelectedItems();
+            if (items.length === 0) return;
+
+            if (!confirm(`Delete ${items.length} item(s)?`)) return;
+
+            const compositeUndo = {
+                type: 'composite',
+                fileIds: [],
+                folders: []
+            };
+
+            // 1. Split Items
+            const fileItems = items.filter(i => i.type === 'file');
+            const folderItems = items.filter(i => i.type === 'folder');
+
+            // 2. Process Files (Batch)
+            if (fileItems.length > 0) {
+                const ids = fileItems.map(i => i.data.id);
+                try {
+                    const res = await fetch(`/admin_api/delete_vocab_batch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(ids)
+                    });
+                    if (res.ok) {
+                        compositeUndo.fileIds = ids;
+                        // Local Update (though we reload later if folders exist)
+                        fileItems.forEach(i => {
+                            i.data.is_deleted = true;
+                            const globalItem = ALL_VOCAB.find(v => v.id == i.data.id);
+                            if (globalItem) globalItem.is_deleted = true;
+                            // Actually if we reload, this doesn't matter much.
+                        });
+                    }
+                } catch (e) { console.error(e); }
+            }
+
+            // 3. Process Folders (Loop)
+            if (folderItems.length > 0) {
+                for (const item of folderItems) {
+                    try {
+                        if (item.subtype === 'stage') {
+                            const formData = new FormData();
+                            formData.append('course_id', COURSE_ID);
+                            formData.append('group_name', fs.currentPath[0]);
+                            formData.append('stage_name', item.name);
+                            const res = await fetch('/admin_api/delete_stage', { method: 'POST', body: formData });
+                            if (res.ok) {
+                                compositeUndo.folders.push({
+                                    subtype: 'stage',
+                                    group: fs.currentPath[0],
+                                    name: item.name
+                                });
+                            }
+                        }
+                        else if (item.subtype === 'group') {
+                            const formData = new FormData();
+                            formData.append('course_id', COURSE_ID);
+                            formData.append('group_name', item.name);
+                            // Capture Config for Undo
+                            const stages = STAGE_CONFIG[item.name] || [];
+
+                            const res = await fetch('/admin_api/delete_group', { method: 'POST', body: formData });
+                            if (res.ok) {
+                                compositeUndo.folders.push({
+                                    subtype: 'group',
+                                    name: item.name,
+                                    stages: stages
+                                });
+                            }
+                        }
+                    } catch (e) { console.error(e); }
+                }
+            }
+
+            // 4. Finalize
+            if (compositeUndo.fileIds.length > 0 || compositeUndo.folders.length > 0) {
+                showUndoToast(compositeUndo);
+                if (compositeUndo.folders.length > 0) reloadAndRestore();
+                else render();
+            }
+        },
+
+        open() {
+            const items = sel.getSelectedItems();
+            if (items.length === 1) {
+                const item = items[0];
+                if (item.type === 'folder') {
+                    fs.cd(item.name);
+                } else {
+                    // Edit File
+                    openEditModal(item.data);
+                }
+            }
+        },
+    };
+
+    /**
+     * RENDERER
+     */
+    function render() {
+        try {
+            const view = document.getElementById('fileView');
+            const bc = document.getElementById('breadcrumbs');
+            const btnNew = document.getElementById('btnNewFile');
+            const btnNewFolder = document.getElementById('btnNewFolder');
+
+            view.innerHTML = '<div id="selectionMarquee"></div>';
+
+            const content = fs.ls();
+
+            // Update Buttons
+            if (fs.currentPath.length === 1) btnNewFolder.disabled = false;
+            else btnNewFolder.disabled = true;
+
+            if (fs.currentPath.length === 2) btnNew.disabled = false;
+            else btnNew.disabled = true;
+
+            // Breadcrumbs
+            let html = `<span class="text-muted small me-2">Location:</span><span class="breadcrumb-item ${fs.currentPath.length === 0 ? 'active' : ''}" onclick="fs.goRoot()"><i class="bi bi-hdd"></i> Groups</span>`;
+            fs.currentPath.forEach((p, idx) => {
+                html += ` <i class="bi bi-chevron-right text-muted mx-1 small"></i> `;
+                const isActive = (idx === fs.currentPath.length - 1);
+                html += `<span class="breadcrumb-item ${isActive ? 'active' : ''}" onclick="fs.goTo(${idx})">${p}</span>`;
+            });
+            bc.innerHTML = html;
+
+            renderItems(content.items, view);
+
+            sel.clear();
+        } catch (e) {
+            alert("Render Error: " + e.message);
+            console.error(e);
+        }
+    }
+
+    function renderItems(items, view) {
+        if (!items || items.length === 0) {
+            view.innerHTML += '<div class="text-muted p-5 text-center"><i>No items in this folder</i></div>';
+            return;
+        }
+        items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'explorer-item';
+            div.dataset.type = item.type;
+            div.dataset.name = item.name;
+            if (item.subtype) div.dataset.subtype = item.subtype;
+
+            // Generate Key
+            const key = `${item.type}:${item.name}:${item.id || 0}`;
+            div.dataset.key = key;
+
+            if (item.data) {
+                div.dataset.json = JSON.stringify(item.data);
+            }
+
+            let iconClass = "bi bi-file-earmark-music file-word";
+            if (item.type === 'folder') {
+                iconClass = "bi bi-folder-fill folder";
+            }
+
+            div.innerHTML = `
+                <i class="item-icon ${iconClass}"></i>
+                <span class="item-label">${item.name}</span>
+            `;
+
+            let clickTimer = null;
+
+            // Events
+            div.onclick = (e) => {
+                e.stopPropagation();
+
+                // Check if already selected (Single selection)
+                if (sel.selectedIds.has(key) && sel.selectedIds.size === 1 && !e.ctrlKey && !e.shiftKey) {
+                    // Potential Rename Trigger
+                    if (clickTimer) clearTimeout(clickTimer);
+                    clickTimer = setTimeout(() => {
+                        // Only rename folders/stages for now (Group rename not supported here yet, File rename via Modal)
+                        // Safety: Check if item is still selected (user might have clicked away)
+                        if (sel.selectedIds.has(key) && item.type === 'folder' && item.subtype === 'stage') {
+                            cm.rename();
+                        }
+                    }, 600); // 600ms delay for "slow" click
+                } else {
+                    if (clickTimer) clearTimeout(clickTimer);
+                    sel.select(key, { ctrl: e.ctrlKey, shift: e.shiftKey });
+                }
+            };
+
+            div.ondblclick = (e) => {
+                e.stopPropagation();
+                if (clickTimer) clearTimeout(clickTimer); // Cancel rename if double clicking
+
+                if (item.type === 'folder') {
+                    fs.cd(item.name);
+                } else {
+                    // Edit Word Logic
+                    openEditModal(item.data);
+                }
+            };
+
+            div.oncontextmenu = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!sel.selectedIds.has(key)) {
+                    sel.select(key, { ctrl: false, shift: false });
+                }
+                cm.show(e.pageX, e.pageY);
+            };
+
+            view.appendChild(div);
+        });
+    }
+
+    function updateSelectionVisuals() {
+        document.querySelectorAll('.explorer-item').forEach(el => {
+            if (sel.selectedIds.has(el.dataset.key)) {
+                el.classList.add('selected');
+            } else {
+                el.classList.remove('selected');
+            }
+        });
+    }
+
+    // Initial Render and Event Listeners
+    document.addEventListener("DOMContentLoaded", () => {
+        // 1. Restore Path if exists (Persisted State)
+        const lastPathStr = sessionStorage.getItem('cm_last_path');
+        if (lastPathStr) {
+            try {
+                const lastPath = JSON.parse(lastPathStr);
+                if (Array.isArray(lastPath)) {
+                    fs.currentPath = lastPath;
+                }
+            } catch (e) { console.error(e); }
+            sessionStorage.removeItem('cm_last_path');
+        }
+
+        // Restore Undo Stack
+        const lastStackStr = sessionStorage.getItem('cm_undo_stack');
+        if (lastStackStr) {
+            try {
+                undoStack = JSON.parse(lastStackStr);
+                // If stack not empty, show generic toast or last item toast?
+                // Or just let it sit there. User can click "Undo" if I add a button globally?
+                // Current UI only shows toast on delete. 
+                // Let's re-show toast if there is something to undo.
+                if (undoStack.length > 0) {
+                    const lastAction = undoStack[undoStack.length - 1];
+                    // Fake the toast trigger
+                    // showUndoToast is designed to push to stack, so we shouldn't call it directly if we already pushed.
+                    // manual toast show:
+                    const toastEl = document.getElementById('undoToast');
+                    let msg = "Item Deleted.";
+                    if (lastAction.type === 'batch_delete') msg = `Deleted ${lastAction.ids.length} files.`;
+                    else if (lastAction.type === 'delete_stage') msg = `Deleted Stage "${lastAction.name}".`;
+                    else if (lastAction.type === 'delete_group') msg = `Deleted Group "${lastAction.name}".`;
+
+                    const body = toastEl.querySelector('.toast-body');
+                    body.innerHTML = `${msg} <a href="#" class="text-warning fw-bold ms-2" onclick="undoLastAction(); return false;">UNDO</a>`;
+                    new bootstrap.Toast(toastEl, { delay: 10000 }).show();
+                }
+            } catch (e) { console.error(e); }
+            sessionStorage.removeItem('cm_undo_stack');
+            updateUndoButtonState();
+        }
+
+        // 2. Init Clipboard
+        clipboard.init();
+
+        // 3. Render Initial View
+        render();
+
+        // 4. Global Event Listeners
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                e.preventDefault();
+                undoLastAction();
+            }
+        });
+
+        // Global Click to clear selection / hide ctx menu
+        document.addEventListener('click', () => {
+            cm.hide();
+        });
+
+        document.getElementById('fileView').addEventListener('click', (e) => {
+            // Only clear if we didn't just drag AND we clicked on the background
+            if (e.target.id === 'fileView' && !window.wasDragging) {
+                sel.clear();
+            }
+            window.wasDragging = false; // Reset
+        });
+
+        document.getElementById('fileView').addEventListener('contextmenu', (e) => {
+            if (e.target.id === 'fileView') {
+                e.preventDefault();
+                cm.show(e.pageX, e.pageY);
+            }
+        });
+
+        // Marquee Logic init
+        initMarquee();
+    });
+
+    // MARQUEE SELECTION LOGIC
+    function initMarquee() {
+        const marquee = document.getElementById('selectionMarquee');
+        const container = document.getElementById('fileView');
+        let isDragging = false;
+        let startX, startY;
+
+        container.addEventListener('mousedown', (e) => {
+            // Start if NOT clicking an item
+            if (e.target.closest('.explorer-item')) return;
+
+            // Also ignore if clicking scrollbar (simple check: if x > scrollWidth?)
+            // For now, closest items check is robust enough for gaps.
+
+            isDragging = true;
+
+            const rect = container.getBoundingClientRect();
+            // Store relative start position
+            startX = e.clientX - rect.left + container.scrollLeft;
+            startY = e.clientY - rect.top + container.scrollTop;
+
+            marquee.style.left = startX + 'px';
+            marquee.style.top = startY + 'px';
+            marquee.style.width = '0px';
+            marquee.style.height = '0px';
+            marquee.style.display = 'block';
+
+            // Relaxed Logic: Only clear if not holding modifiers.
+            // But user requested "don't need to press left and right keys".
+            // Standard behavior: Clear selection if clean click.
+            if (!e.ctrlKey && !e.shiftKey) {
+                sel.clear();
+            }
+        });
+
+        container.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            const rect = container.getBoundingClientRect();
+            const currentX = e.clientX - rect.left + container.scrollLeft;
+            const currentY = e.clientY - rect.top + container.scrollTop;
+
+            const width = Math.abs(currentX - startX);
+            const height = Math.abs(currentY - startY);
+            const left = Math.min(currentX, startX);
+            const top = Math.min(currentY, startY);
+
+            marquee.style.width = width + 'px';
+            marquee.style.height = height + 'px';
+            marquee.style.left = left + 'px';
+            marquee.style.top = top + 'px';
+
+            // Allow selecting while scrolling? Complex.
+            // Check intersections
+            checkSelection(left, top, width, height);
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                // If we actually moved/selected, flag it so Click doesn't clear
+                // Simple threshold check or just flag
+                window.wasDragging = true;
+                setTimeout(() => window.wasDragging = false, 100); // Short timeout to cover the Click event
+
+                isDragging = false;
+                marquee.style.display = 'none';
+            }
+        });
+    }
+
+    function checkSelection(x, y, w, h) {
+        // Simple bounding box intersection
+        const items = document.querySelectorAll('.explorer-item');
+        items.forEach(item => {
+            const elLeft = item.offsetLeft;
+            const elTop = item.offsetTop;
+            const elW = item.offsetWidth;
+            const elH = item.offsetHeight;
+
+            if (x < elLeft + elW && x + w > elLeft &&
+                y < elTop + elH && y + h > elTop) {
+                sel.add(item.dataset.key);
+            }
+        });
+    }
+
+    // Modal Helpers
+    function createNewVocab() {
+        if (fs.currentPath.length !== 2) return;
+        document.getElementById('addModalGroup').value = fs.currentPath[0];
+        document.getElementById('addModalStage').value = fs.currentPath[1];
+        new bootstrap.Modal(document.getElementById('addWordModal')).show();
+    }
+
+    function openEditModal(data) {
+        document.getElementById('editVocabId').value = data.id;
+        document.getElementById('editWordWord').value = data.word;
+        document.getElementById('editWordChinese').value = data.chinese_meaning || "";
+        document.getElementById('editWordStory').value = data.story || "";
+        // document.getElementById('editWordDistractors').value = data.custom_distractors || ""; // Removed
+        document.getElementById('editWordImage').value = data.image_url || '';
+
+        const imgPreview = document.getElementById('editWordImagePreview');
+        if (data.image_url) {
+            imgPreview.src = data.image_url;
+            imgPreview.style.display = 'block';
+        } else {
+            imgPreview.src = '';
+            imgPreview.style.display = 'none';
+        }
+
+        // Populate hidden fields to prevent data loss
+        document.getElementById('editWordCourseId').value = data.course_id || COURSE_ID;
+        document.getElementById('editWordGroup').value = data.group || "Common";
+        document.getElementById('editWordStage').value = data.stage || "Unassigned";
+        document.getElementById('editWordOrder').value = data.display_order || 999;
+
+        // Point to update endpoint
+        document.getElementById('editWordForm').action = "/admin_api/update_vocab/" + data.id;
+
+        new bootstrap.Modal(document.getElementById('editWordModal')).show();
+    }
+
+    function deleteCurrentWord() {
+        if (confirm("Delete this word?")) {
+            const id = document.getElementById('editVocabId').value;
+            fetch(`/admin_api/delete_vocab/${id}`, { method: 'POST' })
+                .then(res => {
+                    if (res.ok || res.redirected) {
+                        // Close modal logic
+                        const modalEl = document.getElementById('editWordModal');
+                        const modal = bootstrap.Modal.getInstance(modalEl);
+                        modal.hide();
+
+                        // Show Toast & Soft Delete Local
+                        showUndoToast(id);
+                        const item = ALL_VOCAB.find(v => v.id == id);
+                        if (item) item.is_deleted = true;
+                        render();
+                    }
+                    else alert("Error deleting word");
+                })
+                .catch(e => console.error(e));
+        }
+    }
+
+    // UNDO SYSTEM
+    let undoStack = []; // Stores { type: 'batch_delete', ids: [...] } or { type: 'delete', id: ... }
+
+    function showUndoToast(actionInfo) {
+        // If passed generic info, normalize
+        if (Array.isArray(actionInfo) || typeof actionInfo === 'number' || typeof actionInfo === 'string') {
+            // Fallback for legacy calls if any
+            actionInfo = { type: 'batch_delete', ids: Array.isArray(actionInfo) ? actionInfo : [actionInfo] };
+        }
+
+        // Push to stack only if it's a NEW action (not just refreshing toast)
+        if (actionInfo !== 'REFRESH') undoStack.push(actionInfo);
+
+        updateUndoButtonState();
+
+        const toastEl = document.getElementById('undoToast');
+        // REFRESH CHECK: If stack empty, hide
+        if (undoStack.length === 0) {
+            const toast = bootstrap.Toast.getInstance(toastEl);
+            if (toast) toast.hide();
+            return;
+        }
+
+        // Peek top of stack for display
+        const displayAction = undoStack[undoStack.length - 1];
+
+        // Format Message
+        let msg = "Item(s) Deleted.";
+        if (displayAction.type === 'composite') {
+            const fCount = displayAction.fileIds ? displayAction.fileIds.length : 0;
+            const dCount = displayAction.folders ? displayAction.folders.length : 0;
+            msg = `Deleted ${fCount + dCount} item(s).`;
+        }
+        else if (displayAction.type === 'batch_delete') msg = `Deleted ${displayAction.ids.length} file(s).`;
+        else if (displayAction.type === 'delete_stage') msg = `Deleted Stage "${displayAction.name}".`;
+        else if (displayAction.type === 'delete_group') msg = `Deleted Group "${displayAction.name}".`;
+        else if (displayAction.type === 'paste_file') msg = (displayAction.mode === 'copy') ? `Copied ${displayAction.ids.length} items.` : `Moved ${displayAction.ids.length} items.`;
+
+        const body = toastEl.querySelector('.toast-body');
+        body.innerHTML = `${msg} <a href="#" class="text-warning fw-bold ms-2" onclick="undoLastAction(); return false;">UNDO</a> 
+                          <button type="button" class="btn-close btn-close-white float-end" data-bs-dismiss="toast" aria-label="Close"></button>`;
+
+        // Show with autohide: false
+        const toast = new bootstrap.Toast(toastEl, { autohide: false });
+        toast.show();
+    }
+
+    async function undoLastAction() {
+        if (undoStack.length === 0) return;
+
+        const action = undoStack.pop(); // Pop current
+
+        // Process Restore
+        if (action.type === 'composite') {
+            // 1. Restore Files
+            if (action.fileIds && action.fileIds.length > 0) {
+                await fetch('/admin_api/restore_vocab_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(action.fileIds)
+                });
+                action.fileIds.forEach(id => {
+                    const item = ALL_VOCAB.find(v => v.id == id);
+                    if (item) item.is_deleted = false;
+                });
+            }
+            // 2. Restore Folders
+            if (action.folders && action.folders.length > 0) {
+                // We must restore them sequentially or parallel
+                for (const folder of action.folders) {
+                    if (folder.subtype === 'stage') {
+                        if (!STAGE_CONFIG[folder.group]) STAGE_CONFIG[folder.group] = [];
+                        STAGE_CONFIG[folder.group].push({ name: folder.name, count: 0 });
+                        await saveStageConfig(folder.group, null, null, true); // skip reload
+                    } else if (folder.subtype === 'group') {
+                        const fd = new FormData();
+                        fd.append('course_id', COURSE_ID);
+                        fd.append('group_name', folder.name);
+                        await fetch('/admin_api/add_group', { method: 'POST', body: fd });
+
+                        if (folder.stages) {
+                            STAGE_CONFIG[folder.name] = folder.stages;
+                            await saveStageConfig(folder.name, null, null, true); // skip reload
+                        }
+                    }
+                }
+            }
+            // Reload if we touched folders (StageConfig sync issues)
+            reloadAndRestore();
+
+        } else if (action.type === 'batch_delete') {
+            // ... Legacy File Batch ...
+            await fetch('/admin_api/restore_vocab_batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action.ids) });
+            reloadAndRestore();
+        } else if (action.type === 'delete_stage') {
+            if (!STAGE_CONFIG[action.group]) STAGE_CONFIG[action.group] = [];
+            STAGE_CONFIG[action.group].push({ name: action.name, count: 0 });
+            await saveStageConfig(action.group);
+        } else if (action.type === 'delete_group') {
+            const fd = new FormData();
+            fd.append('course_id', COURSE_ID);
+            fd.append('group_name', action.name);
+            await fetch('/admin_api/add_group', { method: 'POST', body: fd });
+            if (action.stages) {
+                STAGE_CONFIG[action.name] = action.stages;
+                await saveStageConfig(action.name);
+            } else reloadAndRestore();
+        }
+
+        if (action.type === 'paste_file') {
+            if (action.mode === 'copy') {
+                await fetch('/admin_api/delete_vocab_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(action.ids)
+                });
+                action.ids.forEach(id => {
+                    const idx = ALL_VOCAB.findIndex(v => v.id == id);
+                    if (idx !== -1) ALL_VOCAB[idx].is_deleted = true;
+                });
+                reloadAndRestore();
+            } else if (action.mode === 'cut') {
+                if (action.original_items) {
+                    for (const item of action.original_items) {
+                        const fd = new FormData();
+                        fd.append('source_ids', item.id);
+                        fd.append('operation', 'cut');
+                        fd.append('target_course_id', item.course_id || COURSE_ID);
+                        fd.append('target_group', item.data.parentGroup || item.data.group || "Common");
+                        fd.append('target_stage', item.data.stage || item.stage);
+                        await fetch('/admin_api/paste_content', { method: 'POST', body: fd });
+                    }
+                    reloadAndRestore();
+                }
+            }
+        }
+        else if (action.type === 'paste_folder') {
+            // UNDO FOLDER PASTE
+            // 1. Delete the "New" Item (the Copy/Destination)
+            const delFD = new FormData();
+            delFD.append('course_id', COURSE_ID);
+            delFD.append('group_name', action.newGroup || "Common");
+            if (action.subtype === 'stage') delFD.append('stage_name', action.newStage);
+
+            const delEndpoint = (action.subtype === 'group') ? '/admin_api/delete_group' : '/admin_api/delete_stage';
+            await fetch(delEndpoint, { method: 'POST', body: delFD });
+
+            // 2. If it was CUT, we must restore the Original
+            if (action.mode === 'cut' && action.originalSource) {
+                const restFD = new FormData();
+                restFD.append('course_id', action.originalSource.course_id);
+                restFD.append('group_name', action.originalSource.group);
+                if (action.subtype === 'stage') restFD.append('stage_name', action.originalSource.stage);
+
+                const restEndpoint = (action.subtype === 'group') ? '/admin_api/restore_group' : '/admin_api/restore_stage';
+                await fetch(restEndpoint, { method: 'POST', body: restFD });
+
+                // Frontend: Restore Config Entry locally if possible, but reload is safer
+            }
+            reloadAndRestore();
+        }
+
+        updateUndoButtonState();
+        // Show Previous Undo Item if exists
+        showUndoToast('REFRESH');
+    }
+
+    function updateUndoButtonState() {
+        const btn = document.getElementById('btnGlobalUndo');
+        if (btn) btn.disabled = (undoStack.length === 0);
+    }
+
+    // UPDATED DELETE LOGIC
+    // ... Inside cm object ...
+
+
+    // FOLDER MANAGEMENT
+    function createNewFolder() {
+        const name = prompt("New Stage Name:", "Stage " + ((STAGE_CONFIG[fs.currentPath[0]] || []).length + 1));
+        if (name) {
+            // Add to STAGE_CONFIG and Save
+            const group = fs.currentPath[0];
+            if (!STAGE_CONFIG[group]) STAGE_CONFIG[group] = [];
+            STAGE_CONFIG[group].push({ name: name, count: 0 });
+            saveStageConfig(group);
+        }
+    }
+
+    function updateStageName(oldName, newName) {
+        const group = fs.currentPath[0];
+        const stages = STAGE_CONFIG[group];
+        const stage = stages.find(s => s.name === oldName);
+        if (stage) {
+            stage.name = newName;
+            saveStageConfig(group, oldName, newName);
+        }
+    }
+
+    async function saveStageConfig(group, oldName = null, newName = null, skipReload = false) {
+        // 1. Save Config
+        const formData = new FormData();
+        formData.append('stage_config', JSON.stringify(STAGE_CONFIG[group])); // Current Group's List
+        formData.append('target_group', group);
+
+        try {
+            await fetch('/admin_api/update_course_stages/' + COURSE_ID, {
+                method: 'POST',
+                body: formData
+            });
+
+            // 2. If Rename, Update Words
+            if (oldName && newName) {
+                const wordsToUpdate = ALL_VOCAB.filter(v => v.group === group && v.stage === oldName);
+                if (wordsToUpdate.length > 0) {
+                    const ids = wordsToUpdate.map(v => v.id).join(',');
+                    const fd = new FormData();
+                    fd.append('vocab_ids', ids);
+                    fd.append('stage_name', newName); // Move to new name
+                    await fetch('/admin_api/batch_update_stage', { method: 'POST', body: fd });
+                }
+            }
+
+            if (!skipReload) reloadAndRestore();
+        } catch (e) {
+            console.error(e);
+            alert("Error saving changes");
+        }
+    }
+
+</script>
+
+<script>
+    async function handleAddSubmit(e) {
+        e.preventDefault();
+        const form = e.target;
+        const formData = new FormData(form);
+
+        try {
+            const resp = await fetch(form.action, {
+                method: 'POST',
+                body: formData
+            });
+            if (resp.ok || resp.redirected) {
+                reloadAndRestore();
+            } else {
+                alert("Error adding word");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error submitting form");
+        }
+    }
+
+    async function handleEditSubmit(e) {
+        e.preventDefault();
+        const form = e.target;
+        const formData = new FormData(form);
+        const action = form.action;
+
+        try {
+            const resp = await fetch(action, {
+                method: 'POST',
+                body: formData
+            });
+            if (resp.ok || resp.redirected) {
+                reloadAndRestore();
+            } else {
+                alert("Error saving word");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error submitting form");
+        }
+
+    }
+
+
+    // Global Helper for Persistence
+    function reloadAndRestore() {
+        sessionStorage.setItem('cm_last_path', JSON.stringify(fs.currentPath));
+        sessionStorage.setItem('cm_undo_stack', JSON.stringify(undoStack));
+        window.location.reload();
+    }
+
+    // --- TRASH CAN LOGIC ---
+    let trashModalInstance = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const tm = document.getElementById('trashCanModal');
+        if (tm) {
+            trashModalInstance = new bootstrap.Modal(tm);
+
+            tm.addEventListener('hidden.bs.modal', function () {
+                if (sessionStorage.getItem('cm_needs_reload')) {
+                    sessionStorage.removeItem('cm_needs_reload');
+                    reloadAndRestore();
+                }
+            });
+        }
+    });
+
+    async function openTrashCan() {
+        if (trashModalInstance) {
+            trashModalInstance.show();
+            await loadTrashData();
+        }
+    }
+
+    async function loadTrashData() {
+        const listEl = document.getElementById('trashList');
+        listEl.innerHTML = '<div class="text-center p-3"><div class="spinner-border text-primary"></div></div>';
+
+        try {
+            const resp = await fetch(`/admin_api/get_trash/${COURSE_ID}`);
+            const data = await resp.json();
+
+            if (data.status === 'success') {
+                if (data.items.length === 0) {
+                    listEl.innerHTML = '<div class="text-center text-muted p-3">Trash is empty</div>';
+                    return;
+                }
+
+                let html = '<ul class="list-group list-group-flush">';
+                data.items.forEach(item => {
+                    html += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="fw-bold">${item.word}</span>
+                            <small class="text-muted ms-2">${item.chinese_meaning}</small>
+                            <div class="small text-muted" style="font-size:0.75em;">Group: ${item.group} | Stage: ${item.stage}</div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-success me-1" onclick="restoreTrashItem(${item.id})">Restore</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTrashItem(${item.id})">Delete</button>
+                        </div>
+                    </li>`;
+                });
+                html += '</ul>';
+                listEl.innerHTML = html;
+            } else {
+                listEl.innerHTML = '<div class="text-danger p-3">Failed to load trash</div>';
+            }
+        } catch (e) {
+            console.error(e);
+            listEl.innerHTML = '<div class="text-danger p-3">Error loading trash</div>';
+        }
+    }
+
+    async function restoreTrashItem(id) {
+        if (!confirm("Restore this item?")) return;
+        try {
+            const resp = await fetch(`/admin_api/restore_vocab/${id}`, { method: 'POST' });
+            if (resp.ok) {
+                await loadTrashData(); // Refresh list only
+                sessionStorage.setItem('cm_needs_reload', 'true');
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    async function deleteTrashItem(id) {
+        if (!confirm("Permanently delete this item? This cannot be undone.")) return;
+        try {
+            const resp = await fetch(`/admin_api/permanent_delete_vocab/${id}`, { method: 'POST' });
+            if (resp.ok) await loadTrashData();
+        } catch (e) { console.error(e); }
+    }
+
+    async function emptyTrash() {
+        if (!confirm("CORRECT: Delete ALL items in trash permanently?")) return;
+        try {
+            const resp = await fetch(`/admin_api/empty_trash/${COURSE_ID}`, { method: 'POST' });
+            if (resp.ok) await loadTrashData();
+        } catch (e) { console.error(e); }
+    }
+
+</script>
+
+<!-- TRASH CAN MODAL -->
+<div class="modal fade" id="trashCanModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title"><i class="bi bi-trash3"></i> Recycle Bin</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0" id="trashList" style="min-height: 200px;">
+                <!-- Content -->
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-outline-danger btn-sm me-auto" onclick="emptyTrash()">Empty
+                    Trash</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

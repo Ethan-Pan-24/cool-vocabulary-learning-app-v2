@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-4">
+        <div class="card glass-card p-4 shadow">
+            <h2 class="text-center mb-4">Admin Login</h2>
+            <div class="alert alert-warning text-center">
+                For Administrators Only.<br>
+                Students please use Google Login.
+            </div>
+            <form action="/login" method="post">
+                <div class="mb-3">
+                    <label class="form-label">Admin Email</label>
+                    <input type="email" name="email" class="form-control" required placeholder="admin@example.com">
+                </div>
+                <button type="submit" class="btn btn-dark w-100">Access Admin Panel</button>
+            </form>
+            <div class="text-center mt-3">
+                <a href="/" class="text-muted">Back to Student Login</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

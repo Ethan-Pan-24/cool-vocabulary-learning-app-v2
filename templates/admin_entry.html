@@ -1,0 +1,24 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 text-center">
+        <div class="card glass-card p-5 shadow">
+            <h2 class="mb-4">Welcome, Admin</h2>
+            <p class="mb-4">Please select your destination:</p>
+
+            <div class="d-grid gap-3">
+                <a href="/admin/learner_view" class="btn btn-primary btn-lg">
+                    🧠 Enter Learner View
+                    <div class="small">Test the experiment as a participant</div>
+                </a>
+
+                <a href="/admin" class="btn btn-danger btn-lg">
+                    ⚙️ Enter Control Panel
+                    <div class="small">Manage content, users, and analytics</div>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

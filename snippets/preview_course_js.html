@@ -1,0 +1,7 @@
+<script>
+    function previewCourse(id) {
+        const sel = document.getElementById('group_select_' + id);
+        const group = sel ? sel.value : 'A';
+        window.location.href = `/learn/${id}?preview_group=${encodeURIComponent(group)}`;
+    }
+</script>

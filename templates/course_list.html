@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <h1>Available Courses</h1>
+        <p class="text-muted">Select a course to start learning.</p>
+    </div>
+</div>
+
+<div class="row">
+    {% for course in courses %}
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">{{ course.name }}</h5>
+                <p class="card-text">{{ course.description }}</p>
+                <p class="text-muted small">Groups: {{ course.group_names }}</p>
+            </div>
+            <div class="card-footer bg-white border-top-0">
+                {% if is_admin %}
+                <div class="mb-2">
+                    <label class="small text-muted">Preview Group:</label>
+                    <select class="form-select form-select-sm" id="group_select_{{ course.id }}">
+                        {% for g in course.group_names.split(',') %}
+                        <option value="{{ g.strip() }}">{{ g.strip() }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button class="btn btn-warning w-100" onclick="previewCourse({{ course.id }})">
+                    <i class="bi bi-eye"></i> Preview Course
+                </button>
+                {% elif course.id in user_course_ids %}
+                <a href="/learn/{{ course.id }}" class="btn btn-success w-100">Continue Learning</a>
+                {% else %}
+                <a href="/join/{{ course.id }}" class="btn btn-primary w-100">Join Course</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+        <div class="alert alert-info">No courses available yet. Please ask an admin to create one.</div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function previewCourse(id) {
+        const sel = document.getElementById('group_select_' + id);
+        const group = sel ? sel.value : 'A';
+        window.location.href = `/learn/${id}?preview_group=${encodeURIComponent(group)}`;
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,317 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <a href="/admin" class="btn btn-outline-secondary">&larr; Back to Dashboard</a>
+        <div class="d-flex gap-2">
+            <a href="/admin_api/export_csv{% if current_course_id %}?course_id={{ current_course_id }}{% endif %}"
+                class="btn btn-success">
+                Export CSV
+            </a>
+            <form method="get" action="/admin/users" class="d-flex gap-2">
+                <select name="course_id" class="form-select w-auto" onchange="this.form.submit()">
+                    <option value="">All Courses</option>
+                    {% for c in courses %}
+                    <option value="{{ c.id }}" {% if current_course_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            <button class="btn btn-outline-danger" onclick="openTrashModal()">
+                <i class="bi bi-trash"></i> Recycle Bin
+            </button>
+        </div>
+    </div>
+    <h1 class="mt-3">User Progress Data</h1>
+    <p class="text-muted">View and manage detailed user learning records and quiz scores.</p>
+</div>
+
+<div class="card p-4 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th rowspan="2">User ID</th>
+                    <th rowspan="2">Email</th>
+                    <th rowspan="2">Course</th>
+                    <th rowspan="2">Group</th>
+
+                    {% if headers.sections %}
+                    <th colspan="{{ headers.sections|length }}" class="text-center bg-light">Section Scores (%)</th>
+                    {% endif %}
+
+                    {% if headers.timings %}
+                    <th colspan="{{ headers.timings|length }}" class="text-center bg-light">Timings (s)</th>
+                    {% endif %}
+
+                    {% if headers.nasa %}
+                    <th colspan="{{ headers.nasa|length }}" class="text-center bg-light">NASA-TLX</th>
+                    {% endif %}
+
+                    <th rowspan="2">Date</th>
+                    <th rowspan="2">Details</th>
+                    <th rowspan="2">Action</th>
+                </tr>
+                <tr>
+                    <!-- Sub-headers -->
+                    {% for h in headers.sections %}
+                    <th class="small text-muted">{{ h }}</th>
+                    {% endfor %}
+
+                    {% for h in headers.timings %}
+                    <th class="small text-muted">{{ h }}</th>
+                    {% endfor %}
+
+                    {% for h in headers.nasa %}
+                    <th class="small text-muted">{{ h }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in results %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.meta.email }}</td>
+                    <td>{{ r.meta.course_name }}</td>
+                    <td><span class="badge bg-info text-dark">{{ r.meta.group }}</span></td>
+
+                    <!-- Sections -->
+                    {% for h in headers.sections %}
+                    <td>{{ r.sections.get(h, '-') }}</td>
+                    {% endfor %}
+
+                    <!-- Timings -->
+                    {% for h in headers.timings %}
+                    <td>{{ r.timings.get(h, '-') }}</td>
+                    {% endfor %}
+
+                    <!-- NASA -->
+                    {% for h in headers.nasa %}
+                    <td>{{ r.nasa.get(h, '-') }}</td>
+                    {% endfor %}
+
+                    <td>{{ r.meta.submitted_at }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-info" onclick='showDetails({{ r | tojson | safe }})'>
+                            <i class="bi bi-eye"></i> View
+                        </button>
+                    </td>
+                    <td>
+                        <form action="/admin_api/delete_user_result/{{ r.meta.result_id }}" method="post"
+                            onsubmit="return confirm('Delete this result? (Can be restored from Recycle Bin)');">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if not results %}
+        <p class="text-center text-muted mt-3">No user records found.</p>
+        {% endif %}
+    </div>
+</div>
+</div>
+
+<!-- DETAILS MODAL -->
+<div class="modal fade" id="detailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Detailed Analysis</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs mb-3" id="detailTabs" role="tablist">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
+                            data-bs-target="#tab-learning">Learning Phase</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-quiz">Quiz
+                            Performance</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+                            data-bs-target="#tab-responses">Quiz Answers</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
+                            data-bs-target="#tab-nasa">NASA-TLX</button></li>
+                </ul>
+                <div class="tab-content" id="detailTabsContent">
+                    <div class="tab-pane fade show active" id="tab-learning">
+                        <h6 class="text-secondary">Stage Timings</h6>
+                        <table class="table table-bordered table-sm" id="learningTable"></table>
+                    </div>
+                    <div class="tab-pane fade" id="tab-quiz">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6 class="text-secondary">Section Scores</h6>
+                                <table class="table table-bordered table-sm" id="quizScoreTable"></table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="text-secondary">Quiz Timings</h6>
+                                <table class="table table-bordered table-sm" id="quizTimeTable"></table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="tab-nasa">
+                        <table class="table table-bordered table-sm" id="nasaTable"></table>
+                    </div>
+                    <div class="tab-pane fade" id="tab-responses">
+                        <h6 class="text-secondary">Detailed Answers</h6>
+                        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                            <table class="table table-bordered table-sm" id="responsesTable"></table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TRASH MODAL -->
+<div class="modal fade" id="trashModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> Recycle Bin (User Data)</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between mb-3">
+                    <p class="text-muted">Deleted items are stored here. Empty trash to permanently remove them.</p>
+                    <button class="btn btn-danger btn-sm" onclick="emptyTrash()">Empty Trash</button>
+                </div>
+                <table class="table table-sm table-striped">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>User</th>
+                            <th>Course</th>
+                            <th>Score</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trashTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let detailsModal = null;
+    let trashModal = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        detailsModal = new bootstrap.Modal(document.getElementById('detailsModal'));
+        trashModal = new bootstrap.Modal(document.getElementById('trashModal'));
+    });
+
+    async function openTrashModal() {
+        const res = await fetch('/admin_api/get_result_trash');
+        const data = await res.json();
+        const tbody = document.getElementById('trashTableBody');
+        tbody.innerHTML = '';
+
+        data.forEach(r => {
+            tbody.innerHTML += `
+                <tr>
+                    <td>${r.date}</td>
+                    <td>${r.email}</td>
+                    <td>${r.course}</td>
+                    <td>${r.score}</td>
+                    <td>
+                        <button class="btn btn-sm btn-success" onclick="restoreResult(${r.id})">Restore</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="permDeleteResult(${r.id})">Delete</button>
+                    </td>
+                </tr>
+            `;
+        });
+        trashModal.show();
+    }
+
+    async function restoreResult(id) {
+        if (!confirm('Restore this result?')) return;
+        await fetch(`/admin_api/restore_result/${id}`, { method: 'POST' });
+        openTrashModal(); // Refresh
+        location.reload(); // Refresh main table
+    }
+
+    async function permDeleteResult(id) {
+        if (!confirm('Permanently delete? This cannot be undone.')) return;
+        await fetch(`/admin_api/permanent_delete_result/${id}`, { method: 'POST' });
+        openTrashModal();
+    }
+
+    async function emptyTrash() {
+        if (!confirm('Empty all items? Irreversible!')) return;
+        await fetch(`/admin_api/empty_result_trash`, { method: 'POST' });
+        openTrashModal();
+    }
+
+
+    function showDetails(data) {
+        // Populate Tables
+        renderTable('learningTable', data.timings_learning, 'Stage', 'Time (s)');
+        renderTable('quizScoreTable', data.scores_sections, 'Section', 'Score (%)');
+        renderTable('quizTimeTable', data.timings_quiz, 'Metric', 'Time (s)');
+        renderTable('nasaTable', data.nasa, 'Dimension', 'Score');
+        renderQuizAnswers('responsesTable', data.quiz_responses);
+
+        // Reset to first tab
+        try {
+            const firstTabEl = document.querySelector('#detailTabs button[data-bs-target="#tab-learning"]');
+            const tab = new bootstrap.Tab(firstTabEl);
+            tab.show();
+        } catch (e) { }
+
+        detailsModal.show();
+    }
+
+    function renderTable(tableId, dataObj, keyLabel, valLabel) {
+        const t = document.getElementById(tableId);
+        let html = `<thead class="table-light"><tr><th>${keyLabel}</th><th>${valLabel}</th></tr></thead><tbody>`;
+        if (Object.keys(dataObj).length === 0) {
+            html += `<tr><td colspan="2" class="text-center text-muted">No data available</td></tr>`;
+        } else {
+            for (const [k, v] of Object.entries(dataObj)) {
+                html += `<tr><td>${k}</td><td>${v}</td></tr>`;
+            }
+        }
+        html += `</tbody>`;
+        t.innerHTML = html;
+    }
+
+    function renderQuizAnswers(tableId, responses) {
+        const t = document.getElementById(tableId);
+        let html = `<thead class="table-light"><tr>
+            <th>Section</th>
+            <th>Question</th>
+            <th>Your Answer</th>
+            <th>Correct Answer</th>
+            <th>Score</th>
+            <th>Status</th>
+        </tr></thead><tbody>`;
+
+        if (!responses || responses.length === 0) {
+            html += `<tr><td colspan="6" class="text-center text-muted">No detailed answers available (only for dynamic quizzes).</td></tr>`;
+        } else {
+            responses.forEach(r => {
+                const statusClass = r.is_correct ? 'text-success' : 'text-danger';
+                const statusText = r.is_correct ? 'Correct' : 'Incorrect';
+                const score = r.score !== undefined ? r.score : (r.is_correct ? 1 : 0);
+                html += `<tr>
+                    <td><small class="text-muted">${r.section || 'General'}</small></td>
+                    <td>${r.question}</td>
+                    <td>${r.user_answer}</td>
+                    <td>${r.correct_answer}</td>
+                    <td>${score}</td>
+                    <td class="${statusClass} fw-bold">${statusText}</td>
+                </tr>`;
+            });
+        }
+        html += `</tbody>`;
+        t.innerHTML = html;
+    }
+</script>
+{% endblock %}

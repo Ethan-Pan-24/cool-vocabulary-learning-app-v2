@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 text-center">
+        <div class="card p-5 glass-card shadow">
+            <h3 class="mb-4">{{ message }}</h3>
+
+            <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
+                {% if is_admin %}
+                <a href="/admin" class="btn btn-warning px-4">Admin Panel</a>
+                {% endif %}
+
+                <a href="/courses" class="btn btn-primary px-4">Back to Course List</a>
+
+                {% if link %}
+                <a href="{{ link }}" class="btn btn-outline-secondary px-4">{{ link_text }}</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

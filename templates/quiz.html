@@ -1,0 +1,443 @@
+{% extends "layout.html" %}
+{% block content %}
+<style>
+    .image-container {
+        position: relative;
+        display: inline-block;
+    }
+
+    .image-feedback-buttons {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        display: flex;
+        gap: 5px;
+        z-index: 5;
+    }
+
+    .image-feedback-buttons button {
+        background: rgba(255, 255, 255, 0.95);
+        border: 2px solid #ddd;
+        border-radius: 50%;
+        width: 42px;
+        height: 42px;
+        cursor: pointer;
+        font-size: 22px;
+        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        padding: 0;
+        line-height: 1;
+    }
+
+    .image-feedback-buttons button:hover {
+        transform: scale(1.15);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .image-feedback-buttons button.active-like {
+        background: #ffc107;
+        border-color: #ff9800;
+    }
+
+    .image-feedback-buttons button.active-dislike {
+        background: #f44336;
+        border-color: #d32f2f;
+        color: white;
+    }
+</style>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex align-items-center">
+        <h1>Quiz Phase</h1>
+        {% if is_admin %}
+        <div class="ms-3">
+            <select class="form-select"
+                onchange="const url = new URL(window.location); url.searchParams.set('preview_group', this.value); window.location.href = url.toString();">
+                {% for g in all_groups %}
+                <option value="{{ g }}" {% if group==g or (not group and preview_group==g) %}selected{% endif %}>Group
+                    {{ g }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+    </div>
+    <div class="timer" id="timer" {% if quiz_time_limit==0 %}style="display:none;" {% endif %}>05:00</div>
+</div>
+
+<form action="/submit_quiz/{{ course_id }}{% if preview_group %}?preview_group={{ preview_group }}{% endif %}"
+    method="post" id="quiz-form">
+    <input type="hidden" name="learning_duration" id="learning_duration" value="0">
+    <input type="hidden" name="stage_timing_json" id="stageTimingInput" value="{}">
+    <!-- DYNAMIC QUIZ CONTAINER -->
+    <div id="dynamicQuiz" style="display:none;"></div>
+
+    <!-- LEGACY QUIZ FALLBACK -->
+    <div id="legacyQuiz">
+        <div class="card p-4 mb-4 shadow-sm">
+            <h4 class="mb-4">Part 1: English to Chinese</h4>
+            {% for item in vocab_list %}
+            <div class="mb-4">
+                <p class="fw-bold">{{ loop.index }}. What is the Chinese meaning of "{{ item.word }}"?</p>
+                {% for option in item.options %}
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="translation_{{ item.id }}" value="{{ option }}"
+                        required>
+                    <label class="form-check-label">{{ option }}</label>
+                </div>
+                {% endfor %}
+                <div class="form-check text-muted">
+                    <input class="form-check-input" type="radio" name="translation_{{ item.id }}" value="I don't know"
+                        required>
+                    <label class="form-check-label">我不知道 (I don't know)</label>
+                </div>
+            </div>
+            <hr>
+            {% endfor %}
+        </div>
+
+        <div class="card p-4 mb-4 shadow-sm">
+            <h4 class="mb-4">Part 2: Sentence Construction</h4>
+            {% for item in vocab_list %}
+            <div class="mb-4">
+                <p class="fw-bold">{{ loop.index }}. Please write a sentence using the word "<strong>{{ item.word
+                        }}</strong>".</p>
+                {% if item.image_url %}
+                <div class="image-container d-inline-block">
+                    <img src="{{ item.image_url }}" class="img-fluid rounded mb-2" style="max-height: 150px;"
+                        onload="trackImageView('{{ item.image_url }}', {{ course_id }}, {{ item.id }})">
+                    <div class="image-feedback-buttons">
+                        <button type="button"
+                            onclick="rateImage(this, 'like', '{{ item.image_url }}', {{ course_id }}, {{ item.id }})"
+                            title="Like" data-action="like">👍🏿</button>
+                        <button type="button"
+                            onclick="rateImage(this, 'dislike', '{{ item.image_url }}', {{ course_id }}, {{ item.id }})"
+                            title="Dislike" data-action="dislike">👎🏿</button>
+                    </div>
+                </div>
+                {% endif %}
+                <textarea name="sentence_{{ item.id }}" class="form-control" rows="2"
+                    placeholder="Input your sentence here..." required></textarea>
+            </div>
+            <hr>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card p-4 mb-5 shadow-sm">
+        <h4 class="mb-4">NASA-TLX Workload Assessment (工作負荷評量)</h4>
+        <p class="text-muted">請根據以下定義，評估您在本次任務中的感受 (0-100)。</p>
+
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <label class="form-label fw-bold">1. 心智需求 (Mental Demand)</label>
+                <div class="small text-muted mb-2">
+                    定義：指執行任務時需要多少心理與感知活動（例如：思考、決定、計算、記憶、看、搜尋等）。<br>
+                    <strong>評量重點：任務是簡單還是具有挑戰性？是單純還是複雜？是需要精確判斷還是容錯率高？</strong>
+                </div>
+                <input type="range" class="form-range" name="nasa_mental" min="0" max="100" step="5" value="50"
+                    oninput="this.nextElementSibling.innerText = this.value">
+                <div class="text-center fw-bold">50</div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <label class="form-label fw-bold">2. 體力需求 (Physical Demand)</label>
+                <div class="small text-muted mb-2">
+                    定義：指執行任務時需要多少肢體活動（例如：推、拉、轉動、控制、啟動等）。<br>
+                    <strong>評量重點：任務是輕鬆還是辛苦？步調是緩慢還是快速？是輕鬆舒緩的還是費力勞累的？</strong>
+                </div>
+                <input type="range" class="form-range" name="nasa_physical" min="0" max="100" step="5" value="50"
+                    oninput="this.nextElementSibling.innerText = this.value">
+                <div class="text-center fw-bold">50</div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <label class="form-label fw-bold">3. 時間需求 (Temporal Demand)</label>
+                <div class="small text-muted mb-2">
+                    定義：指因為任務發生的頻率或步調，而讓操作者感受到的時間壓力。<br>
+                    <strong>評量重點：任務的步調是緩慢閒適的，還是快速且令人瘋狂（急速）的？</strong>
+                </div>
+                <input type="range" class="form-range" name="nasa_temporal" min="0" max="100" step="5" value="50"
+                    oninput="this.nextElementSibling.innerText = this.value">
+                <div class="text-center fw-bold">50</div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <label class="form-label fw-bold">4. 表現感受 (Performance)</label>
+                <div class="small text-muted mb-2">
+                    定義：操作者對自己達成任務目標成功程度的自我評估。<br>
+                    <strong>評量重點：你認為自己達成實驗(或自己)設定目標的成功率如何？你對自己的表現滿意嗎？</strong>
+                </div>
+                <input type="range" class="form-range" name="nasa_performance" min="0" max="100" step="5" value="50"
+                    oninput="this.nextElementSibling.innerText = this.value">
+                <div class="text-center fw-bold">50</div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <label class="form-label fw-bold">5. 努力程度 (Effort)</label>
+                <div class="small text-muted mb-2">
+                    定義：為了達到目前的表現水準，操作者必須投入多少心智與體力上的努力。<br>
+                    <strong>評量重點：無論最終結果如何，你為了完成這項任務感覺自己「工作得多辛苦」？</strong>
+                </div>
+                <input type="range" class="form-range" name="nasa_effort" min="0" max="100" step="5" value="50"
+                    oninput="this.nextElementSibling.innerText = this.value">
+                <div class="text-center fw-bold">50</div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <label class="form-label fw-bold">6. 挫折程度 (Frustration Level)</label>
+                <div class="small text-muted mb-2">
+                    定義：指在執行任務的過程中，操作者心理感受到的壓力和情緒狀態。<br>
+                    <strong>評量重點：你在任務中感到的是安全、滿足、放鬆，還是覺得不安、氣餒、惱火、壓力大且煩躁？</strong>
+                </div>
+                <input type="range" class="form-range" name="nasa_frustration" min="0" max="100" step="5" value="50"
+                    oninput="this.nextElementSibling.innerText = this.value">
+                <div class="text-center fw-bold">50</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-center mb-5">
+        <button type="submit" class="btn btn-danger btn-lg px-5">Submit Quiz</button>
+    </div>
+</form>
+
+<script>
+    // Calculate Learning Duration
+    const storageKey = 'learning_time_{{ course_id }}';
+    const accumulatedTime = parseFloat(localStorage.getItem(storageKey)) || 0;
+
+    // Stage Timings
+    const stageStorageKey = 'stage_times_{{ course_id }}';
+    const stageData = localStorage.getItem(stageStorageKey) || "{}";
+
+    // Set to hidden inputs
+    document.getElementById('learning_duration').value = accumulatedTime;
+    document.getElementById('stageTimingInput').value = stageData;
+
+    // Optional: Clear after submission? 
+    // Maybe keep it until explicitly cleared or just leave it. 
+    // For now, let's leave it so if they go back they don't lose progress, 
+    // but we might want to reset if they start a new session? 
+    // Let's assume manual reset isn't needed for this simple flow.
+
+    // --- TIMER LOGIC ---
+    const quizTimeLimit = {{ quiz_time_limit | default (5) }};
+    let timeLeft = quizTimeLimit * 60;
+    let elapsedSeconds = 0;  // Track actual time spent
+    const timerDisplay = document.getElementById('timer');
+
+    // Start tracking elapsed time immediately
+    const elapsedTimer = setInterval(() => {
+        elapsedSeconds++;
+    }, 1000);
+
+    if (quizTimeLimit > 0) {
+        const countdown = setInterval(() => {
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            timerDisplay.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+
+            if (timeLeft <= 0) {
+                clearInterval(countdown);
+                clearInterval(elapsedTimer);
+                alert("Time is up! Submitting your quiz.");
+                document.getElementById('quiz-form').submit();
+            }
+            timeLeft--;
+        }, 1000);
+    }
+
+    // Prevent double submission & Inject Quiz Time
+    document.getElementById('quiz-form').onsubmit = function () {
+        const btn = this.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = "Submitting...";
+
+        // Stop tracking elapsed time
+        clearInterval(elapsedTimer);
+
+        // Inject Quiz Duration (use actual elapsed time)
+        try {
+            let st = JSON.parse(document.getElementById('stageTimingInput').value || "{}");
+            st["Quiz"] = elapsedSeconds;  // Use elapsed time, not remaining time
+            document.getElementById('stageTimingInput').value = JSON.stringify(st);
+
+            // 1. Clear LocalStorage immediately before submission to prevent accumulation in next attempt
+            localStorage.removeItem(storageKey);
+            localStorage.removeItem(stageStorageKey);
+            console.log("LocalStorage cleared for course:", {{ course_id }});
+    } catch (e) { console.error(e); }
+    };
+
+    // --- DYNAMIC QUIZ RENDERER ---
+    const rawConfig = '{{ quiz_config | safe }}';
+    let QUIZ_DATA = [];
+    try {
+        QUIZ_DATA = JSON.parse(rawConfig || '[]');
+    } catch (e) { console.error("Invalid Quiz Config", e); }
+
+    if (QUIZ_DATA.length > 0) {
+        document.getElementById('legacyQuiz').innerHTML = ''; // Remove legacy DOM to avoid validation conflicts
+        document.getElementById('dynamicQuiz').style.display = 'block';
+        renderDynamicQuiz(QUIZ_DATA);
+    }
+
+    function renderDynamicQuiz(data) {
+        const container = document.getElementById('dynamicQuiz');
+        let html = '';
+
+        data.forEach((block, idx) => {
+            if (block.block_type === 'title') {
+                html += `
+                <div class="card p-4 mb-3 shadow-sm" style="border-top: 5px solid #673ab7;">
+                    <h2>${block.title || ''}</h2>
+                    <p class="text-muted">${block.description || ''}</p>
+                </div>`;
+            } else if (block.block_type === 'image') {
+                const imageId = `dynamic-img-${idx}`;
+                html += `
+                <div class="card p-3 mb-3 shadow-sm text-center">
+                    ${block.title ? `<h5 class="mb-2">${block.title}</h5>` : ''}
+                    ${block.image_url ? `
+                        <div class="image-container d-inline-block">
+                            <img src="${block.image_url}" 
+                                class="img-fluid rounded" 
+                                style="max-height:400px; width: auto; object-fit: contain; margin: 0 auto; display: block;"
+                                onload="trackImageView('${block.image_url}', {{ course_id }}, null)">
+                            <div class="image-feedback-buttons">
+                                <button type="button" onclick="rateImage(this, 'like', '${block.image_url}', {{ course_id }}, null)" 
+                                    title="Like" data-action="like">👍🏿</button>
+                                <button type="button" onclick="rateImage(this, 'dislike', '${block.image_url}', {{ course_id }}, null)" 
+                                    title="Dislike" data-action="dislike">👎🏿</button>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>`;
+            } else if (block.block_type === 'video') {
+                let embed = block.video_url || "";
+                if (embed.includes("watch?v=")) embed = embed.replace("watch?v=", "embed/");
+                if (embed.includes("youtu.be")) embed = "https://www.youtube.com/embed/" + embed.split("/").pop();
+
+                html += `
+                <div class="card p-3 mb-3 shadow-sm">
+                    ${block.title ? `<h5 class="mb-2">${block.title}</h5>` : ''}
+                    <div class="ratio ratio-16x9">
+                        <iframe src="${embed}" allowfullscreen></iframe>
+                    </div>
+                </div>`;
+            } else if (block.block_type === 'section') {
+                html += `
+                <div class="alert alert-secondary mt-4 mb-3 border-left-primary">
+                    <h4>${block.title || 'Section'}</h4>
+                    ${block.description ? `<p>${block.description}</p>` : ''}
+                </div>`;
+            } else if (block.block_type === 'question') {
+                html += renderQuestion(block, idx);
+            }
+        });
+
+        container.innerHTML = html;
+    }
+
+    function renderQuestion(q, idx) {
+        let h = `
+        <div class="card p-4 mb-3 shadow-sm">
+            ${q.title ? `<h5 class="mb-3">${q.title} ${q.required ? '<span class="text-danger">*</span>' : ''}</h5>` : ''}
+            ${q.image_url ? `
+                <div class="image-container d-inline-block mb-3">
+                    <img src="${q.image_url}" 
+                        class="img-fluid rounded" 
+                        style="max-height:300px; width: auto; object-fit: contain; margin: 0 auto; display: block;"
+                        onload="trackImageView('${q.image_url}', {{ course_id }}, null)">
+                    <div class="image-feedback-buttons">
+                        <button type="button" onclick="rateImage(this, 'like', '${q.image_url}', {{ course_id }}, null)" 
+                            title="Like" data-action="like">👍🏿</button>
+                        <button type="button" onclick="rateImage(this, 'dislike', '${q.image_url}', {{ course_id }}, null)" 
+                            title="Dislike" data-action="dislike">👎🏿</button>
+                    </div>
+                </div>
+            ` : ''}
+        `;
+
+        const qName = `q_${q.id || idx}`;
+        const reqAttr = q.required ? 'required' : '';
+
+        if (q.type === 'short_answer') {
+            h += `<input type="text" class="form-control" name="${qName}" placeholder="Your answer" ${reqAttr}>`;
+        } else if (q.type === 'paragraph' || q.type === 'sentence') {
+            h += `<textarea class="form-control" name="${qName}" rows="3" placeholder="Your answer" ${reqAttr}></textarea>`;
+        } else if (q.type === 'date') {
+            h += `<input type="date" class="form-control" name="${qName}" ${reqAttr}>`;
+        } else if (q.type === 'time') {
+            h += `<input type="time" class="form-control" name="${qName}" ${reqAttr}>`;
+        } else if (q.type === 'multiple_choice') {
+            (q.options || []).forEach(opt => {
+                h += `
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="${qName}" value="${opt}" ${reqAttr}>
+                    <label class="form-check-label">${opt}</label>
+                </div>`;
+            });
+        } else if (q.type === 'checkboxes') {
+            // Checkboxes: name should be array-like usually, but simple form post might need handling.
+            // Be careful with 'required' on checkboxes (needs at least one). 
+            // Browser native 'required' on checkbox group is tricky.
+            // For now, let's omit 'required' enforcement on checkboxes to avoid blocking submission if logic is complex,
+            // or use simple JS validation later.
+            (q.options || []).forEach(opt => {
+                h += `
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="${qName}" value="${opt}">
+                    <label class="form-check-label">${opt}</label>
+                </div>`;
+            });
+        } else if (q.type === 'dropdown') {
+            h += `<select class="form-select" name="${qName}" ${reqAttr}>
+                    <option value="" selected disabled>Choose...</option>`;
+            (q.options || []).forEach(opt => {
+                h += `<option value="${opt}">${opt}</option>`;
+            });
+            h += `</select>`;
+        }
+
+        h += `</div>`;
+        return h;
+    }
+
+    // Image Rating Functions
+    async function rateImage(btn, action, imageUrl, courseId, vocabId) {
+        const formData = new FormData();
+        formData.append('image_url', imageUrl);
+        formData.append('action', action);
+        formData.append('course_id', courseId);
+        formData.append('vocab_id', vocabId || '');
+        formData.append('context', 'quiz');
+
+        try {
+            await fetch('/api/image_interaction', {
+                method: 'POST',
+                body: formData
+            });
+
+            // Visual feedback
+            const container = btn.parentElement;
+            container.querySelectorAll('button').forEach(b => {
+                b.classList.remove('active-like', 'active-dislike');
+            });
+            btn.classList.add(action === 'like' ? 'active-like' : 'active-dislike');
+        } catch (e) {
+            console.error('Failed to submit feedback', e);
+        }
+    }
+
+    function trackImageView(imageUrl, courseId, vocabId) {
+        const formData = new FormData();
+        formData.append('image_url', imageUrl);
+        formData.append('action', 'view');
+        formData.append('course_id', courseId);
+        formData.append('vocab_id', vocabId || '');
+        formData.append('context', 'quiz');
+
+        fetch('/api/image_interaction', { method: 'POST', body: formData }).catch(e => console.error('View tracking failed', e));
+    }
+</script>
+{% endblock %}

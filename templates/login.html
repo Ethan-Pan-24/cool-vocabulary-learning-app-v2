@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-4">
+        <div class="card glass-card p-4 shadow">
+            <h2 class="text-center mb-4">Login</h2>
+            <div class="d-grid gap-2 mb-3">
+                <a href="/login/google" class="btn btn-outline-danger">
+                    <img src="https://www.svgrepo.com/show/475656/google-color.svg" width="20" height="20" class="me-2"
+                        alt="Google">
+                    Login with Google
+                </a>
+                </a>
+            </div>
+            <p class="text-center text-muted mt-3 small">Please use your school account to login.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
