@@ -8,6 +8,7 @@ from database import engine, get_db, init_db, User, Vocabulary, QuizResult, Cour
 import utils
 import json
 import random
+import os
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from dotenv import load_dotenv

@@ -1,9 +1,11 @@
 from openai import OpenAI
 from dotenv import load_dotenv
+import requests
+import os
+import base64
+import json
 
 load_dotenv() # Load variables from .env
-
-import requests
 
 # API Configuration
 API_KEY = os.getenv("OPENAI_API_KEY")
