@@ -17,7 +17,7 @@ client = OpenAI(
     base_url=BASE_URL,
 )
 
-ADMIN_EMAILS = ["Panyihao24@gmail.com", "390010@fhsh.khc.edu.tw", "test@admin.com"]
+ADMIN_EMAILS = ["panyihao24@gmail.com", "390010@fhsh.khc.edu.tw"]
 
 def encode_image(image_source):
     """Encodes an image (local or URL) to base64."""
