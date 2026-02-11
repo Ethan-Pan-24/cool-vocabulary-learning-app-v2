@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
-from database import engine, get_db, init_db, User, Vocabulary, QuizResult, Course, Enrollment, ImageInteraction
+from database import engine, get_db, init_db, User, Vocabulary, QuizResult, Course, Enrollment, ImageInteraction, ImageRating
 import utils
 import json
 import random
@@ -23,6 +23,25 @@ app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY",
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+import logging
+import traceback
+logging.basicConfig(level=logging.ERROR)
+
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        import sys
+        print("\n" + "="*50)
+        print(f"CRITICAL ERROR CAUGHT: {e}")
+        print(f"URL: {request.url}")
+        print(f"Method: {request.method}")
+        print("-" * 20)
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return Response(f"Internal Server Error\n\n{traceback.format_exc()}", status_code=500, media_type="text/plain")
 
 from utils import ADMIN_EMAILS
 
@@ -89,6 +108,7 @@ async def login_page(request: Request, user: User = Depends(get_current_user_req
 
 @app.post("/login")
 async def login(request: Request, email: str = Form(...), db: Session = Depends(get_db)):
+    email = email.strip()
     user = db.query(User).filter(User.email == email).first()
     if not user:
         user = User(email=email)
@@ -101,11 +121,12 @@ async def login(request: Request, email: str = Form(...), db: Session = Depends(
     # Case-insensitive admin check
     is_admin_login = email.lower() in [e.lower() for e in ADMIN_EMAILS]
 
+    if is_admin_login:
+        # User requested to block admin logins from this form and redirect to home
+        return RedirectResponse(url="/", status_code=303)
+
     # Simple session cookie (In prod use secure signed cookies)
     response = RedirectResponse(url="/courses", status_code=status.HTTP_303_SEE_OTHER)
-    
-    if is_admin_login:
-         response = RedirectResponse(url="/admin/entry_choice", status_code=status.HTTP_303_SEE_OTHER)
     
     response.set_cookie(key="user_email", value=email)
     return response
@@ -118,10 +139,56 @@ async def secret_admin_login(request: Request):
 async def course_list(request: Request, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/")
-    courses = db.query(Course).filter(Course.is_deleted == False).all()
-    # Helper to check if user is enrolled
+    
+    all_courses = db.query(Course).filter(Course.is_deleted == False).all()
+    
+    official_courses = []
+    community_courses = []
+    created_courses = []
+    joined_courses = []
+
+    for c in all_courses:
+        is_official = False
+        if c.creator_id is None:
+            is_official = True
+        else:
+            creator = db.query(User).filter(User.id == c.creator_id).first()
+            if creator and creator.email in ADMIN_EMAILS:
+                is_official = True
+        
+        if is_official:
+            official_courses.append(c)
+        else:
+            # Community courses: public OR owned by current user
+            if c.is_public or c.creator_id == user.id:
+                community_courses.append(c)
+        
+        # Created by You
+        if c.creator_id == user.id:
+            created_courses.append(c)
+            
+    # Joined Courses (need to check enrollments against all_courses to ensure not deleted if not handled by all_courses query)
+    # The all_courses query already filters is_deleted=False. 
+    # If we want to show joined courses that are not deleted:
+    user_enrollment_ids = [e.course_id for e in user.enrollments]
+    for c in all_courses:
+        if c.id in user_enrollment_ids:
+            joined_courses.append(c)
+                
     user_course_ids = [e.course_id for e in user.enrollments]
-    return templates.TemplateResponse("course_list.html", {"request": request, "courses": courses, "user_course_ids": user_course_ids, "is_admin": getattr(user, "is_admin", False)})
+    official_course_ids = [c.id for c in official_courses]
+    
+    return templates.TemplateResponse("course_list.html", {
+        "request": request, 
+        "official_courses": official_courses, 
+        "community_courses": community_courses, 
+        "created_courses": created_courses,
+        "joined_courses": joined_courses,
+        "user_course_ids": user_course_ids, 
+        "official_course_ids": official_course_ids,
+        "is_admin": getattr(user, "is_admin", False),
+        "user_id": user.id
+    })
 
 @app.get("/join/{course_id}")
 async def join_course(course_id: int, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
@@ -134,29 +201,42 @@ async def join_course(course_id: int, user: User = Depends(get_current_user_req)
     
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
-        return HTTPException(status_code=404, detail="Course not found")
+        raise HTTPException(status_code=404, detail="Course not found")
         
-    # Auto-Balancing Logic
-    # 1. Parse group names
-    group_names = [g.strip() for g in course.group_names.split(",")] if course.group_names else ["A", "B"]
-    
-    # 2. Count current enrollments per group
-    # This query counts users in each group for this course
-    group_counts = {}
-    for g in group_names:
-        count = db.query(Enrollment).filter(Enrollment.course_id == course_id, Enrollment.group == g).count()
-        group_counts[g] = count
-    
-    # 3. Find group with min users
-    min_count = min(group_counts.values())
-    candidates = [g for g, c in group_counts.items() if c == min_count]
-    assigned_group = random.choice(candidates)
-    
-    new_enrollment = Enrollment(user_id=user.id, course_id=course_id, group=assigned_group)
-    db.add(new_enrollment)
-    db.commit()
-    
-    return RedirectResponse(url=f"/learn/{course_id}", status_code=303)
+    try:
+        # Auto-Balancing Logic
+        # 1. Parse group names
+        group_names = [g.strip() for g in course.group_names.split(",")] if course.group_names else ["A", "B"]
+        # Filter empty strings just in case
+        group_names = [g for g in group_names if g]
+        if not group_names: group_names = ["A", "B"]
+        
+        # 2. Count current enrollments per group
+        # This query counts users in each group for this course
+        group_counts = {}
+        for g in group_names:
+            count = db.query(Enrollment).filter(Enrollment.course_id == course_id, Enrollment.group == g).count()
+            group_counts[g] = count
+        
+        # 3. Find group with min users
+        if not group_counts:
+             group_counts = {"A": 0, "B": 0}
+             
+        min_count = min(group_counts.values())
+        candidates = [g for g, c in group_counts.items() if c == min_count]
+        
+        import random
+        assigned_group = random.choice(candidates)
+        
+        new_enrollment = Enrollment(user_id=user.id, course_id=course_id, group=assigned_group)
+        db.add(new_enrollment)
+        db.commit()
+        
+        return RedirectResponse(url=f"/learn/{course_id}", status_code=303)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(content=f"Error joining course: {str(e)}", status_code=500)
 
 @app.get("/admin/entry_choice", response_class=HTMLResponse)
 async def admin_entry_choice(request: Request, user: User = Depends(get_current_user_req)):
@@ -195,9 +275,10 @@ async def admin_course_detail(course_id: int, request: Request, user: User = Dep
     # Legacy route: Redirect to new consolidated Content Manager
     return RedirectResponse(url=f"/admin/course/{course_id}/content_manager", status_code=303)
 
-@app.get("/admin/course/{course_id}/quiz_editor", response_class=HTMLResponse)
-async def admin_quiz_editor(course_id: int, request: Request, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
-    if not user or not user.is_admin:
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        return HTMLResponse("Course not found", status_code=404)
+    if not user or (not user.is_admin and course.creator_id != user.id):
         return RedirectResponse(url="/")
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -220,7 +301,11 @@ async def admin_quiz_editor(course_id: int, request: Request, user: User = Depen
 
 @app.get("/admin/course/{course_id}/content_manager", response_class=HTMLResponse)
 async def admin_content_manager(course_id: int, request: Request, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
-    if not user or user.email not in ADMIN_EMAILS:
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        return RedirectResponse(url="/admin")
+        
+    if not user or (not user.is_admin and course.creator_id != user.id):
         return RedirectResponse(url="/")
         
     course = db.query(Course).filter(Course.id == course_id).first()
@@ -278,7 +363,7 @@ async def admin_content_manager(course_id: int, request: Request, user: User = D
     })
 
 @app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users(request: Request, course_id: str = None, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
+async def admin_users(request: Request, course_id: str = None, attempt: str = None, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
     if not user or user.email not in ADMIN_EMAILS:
         return HTMLResponse(content="Unauthorized", status_code=401)
 
@@ -293,6 +378,16 @@ async def admin_users(request: Request, course_id: str = None, user: User = Depe
         current_course_id = int(course_id)
         query = query.filter(QuizResult.course_id == current_course_id)
     
+    # Get available attempts for the dropdown (based on current course filter)
+    # We query all distinct attempts from the filtered results BEFORE filtering by specific attempt
+    base_results = query.filter(QuizResult.is_deleted == False).all()
+    available_attempts = sorted(list(set(r.attempt for r in base_results if r.attempt is not None)))
+
+    current_attempt = None
+    if attempt and attempt.strip().isdigit():
+        current_attempt = int(attempt)
+        query = query.filter(QuizResult.attempt == current_attempt)
+
     raw_results = query.filter(QuizResult.is_deleted == False).order_by(QuizResult.submitted_at.desc()).all()
     
     # Pass 1: Collect All Unique Metric Keys
@@ -465,13 +560,20 @@ async def admin_users(request: Request, course_id: str = None, user: User = Depe
         },
         "courses": courses,
         "current_course_id": current_course_id,
+        "available_attempts": available_attempts,
+        "current_attempt": current_attempt,
         "is_admin": True
     })
+
 
 from admin_api import router as admin_router
 app.include_router(admin_router)
 
+from student_analytics_api import router as analytics_router
+app.include_router(analytics_router)
+
 # --- LEARNER ROUTES ---
+
 
 @app.get("/learn/{course_id}", response_class=HTMLResponse)
 async def learn_page(course_id: int, request: Request, stage_index: int = 0, preview_group: str = None, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
@@ -492,92 +594,113 @@ async def learn_page(course_id: int, request: Request, stage_index: int = 0, pre
         # Not enrolled and not previewing as admin
         return RedirectResponse(url="/courses")
 
-    # Stage Logic
-    course = db.query(Course).filter(Course.id == course_id).first()
-    if not course or course.is_deleted:
-        raise HTTPException(status_code=404, detail="Course not found")
-
-    import json
-    has_config = False
     try:
-        if course.stage_config and len(str(course.stage_config)) > 2:
-             has_config = True
-        raw_config = json.loads(course.stage_config) if course.stage_config else []
-    except:
-        raw_config = []
+        # Stage Logic
+        course = db.query(Course).filter(Course.id == course_id).first()
+        if not course or course.is_deleted:
+            raise HTTPException(status_code=404, detail="Course not found")
     
-    stages = []
-    # Determine which stage list to use based on Group
-    if isinstance(raw_config, list):
-        stages = raw_config # Legacy support
-        if not raw_config and has_config: pass # Empty list from config
-    elif isinstance(raw_config, dict):
-        # Strict lookup: If config exists, look for group. 
-        # If group missing, fallback to "Common". 
-        # If "Common" missing, then empty list (don't fallback to 'all vocab' legacy mode)
-        stages = raw_config.get(group, raw_config.get("Common", []))
-
-
-    current_stage_name = "Full List"
-    is_last_stage = True
-    next_stage_index = -1
-    
-    # 1. Determine Current Stage Info
-    if stages:
-        # Validate index
-        if stage_index < 0: stage_index = 0
-        if stage_index >= len(stages): stage_index = len(stages) - 1
+        import json
+        has_config = False
+        try:
+            if course.stage_config and len(str(course.stage_config)) > 2:
+                 has_config = True
+            raw_config = json.loads(course.stage_config) if course.stage_config else []
+        except:
+            raw_config = []
         
-        current_stage = stages[stage_index]
-        current_stage_name = current_stage.get('name', f"Stage {stage_index + 1}")
-        
-        # Navigation
-        if stage_index < len(stages) - 1:
-            is_last_stage = False
-            next_stage_index = stage_index + 1
+        stages = []
+        # Determine which stage list to use based on Group
+        if isinstance(raw_config, list):
+            stages = raw_config # Legacy support
+            if not raw_config and has_config: pass # Empty list from config
+        elif isinstance(raw_config, dict):
+            # Strict lookup: If config exists, look for group. 
+            # If group missing, fallback to "Common". 
+            # If "Common" missing, then empty list (don't fallback to 'all vocab' legacy mode)
+            stages = raw_config.get(group, raw_config.get("Common", []))
     
-    # 2. Fetch Filtered Vocab
-    if stages:
-         # Query for THIS stage
-         vocab_subset = db.query(Vocabulary).filter(
-            Vocabulary.course_id == course_id,
-            or_(Vocabulary.group == 'Common', Vocabulary.group == group),
-            Vocabulary.stage == current_stage_name,
-            Vocabulary.is_deleted == False
-        ).order_by(Vocabulary.display_order).all()
-    elif has_config:
-        # Config exists (empty list or dict with empty list) -> Show NOTHING (Empty Stage)
-        vocab_subset = []
-    else:
-        # Fallback to everything if no stages defined (Legacy Mode)
-        vocab_subset = db.query(Vocabulary).filter(
-            Vocabulary.course_id == course_id,
-            or_(Vocabulary.group == 'Common', Vocabulary.group == group),
-            Vocabulary.is_deleted == False
-        ).order_by(Vocabulary.display_order).all()
+    
+        current_stage_name = "Full List"
+        is_last_stage = True
+        next_stage_index = -1
+        
+        # 1. Determine Current Stage Info
+        if stages:
+            # Validate index
+            if stage_index < 0: stage_index = 0
+            if stage_index >= len(stages): stage_index = len(stages) - 1
+            
+            current_stage = stages[stage_index]
+            if isinstance(current_stage, dict):
+                # Standardize on 'title', fallback to 'name', then index
+                current_stage_name = current_stage.get('title') or current_stage.get('name') or f"Stage {stage_index + 1}"
+            else:
+                current_stage_name = str(current_stage)
+            
+            # Navigation
+            if stage_index < len(stages) - 1:
+                is_last_stage = False
+                next_stage_index = stage_index + 1
+        
+        # 2. Fetch Filtered Vocab
+        if stages:
+             # Query for THIS stage
+             vocab_subset = db.query(Vocabulary).filter(
+                Vocabulary.course_id == course_id,
+                or_(Vocabulary.group == 'Common', Vocabulary.group == group),
+                Vocabulary.stage == current_stage_name,
+                Vocabulary.is_deleted == False
+            ).order_by(Vocabulary.display_order).all()
+        elif has_config:
+            # Config exists (empty list or dict with empty list) -> Show NOTHING (Empty Stage)
+            vocab_subset = []
+        else:
+            # Fallback to everything if no stages defined (Legacy Mode)
+            vocab_subset = db.query(Vocabulary).filter(
+                Vocabulary.course_id == course_id,
+                or_(Vocabulary.group == 'Common', Vocabulary.group == group),
+                Vocabulary.is_deleted == False
+            ).order_by(Vocabulary.display_order).all()
+    
+        # Check if quiz taken
+        prior_results = db.query(QuizResult).filter(
+            QuizResult.user_id == user.id, 
+            QuizResult.course_id == course_id,
+            QuizResult.is_deleted == False
+        ).count()
+        attempt_count = prior_results
+        
+        is_completed = (prior_results > 0) and not is_admin and not preview_group
+    
+        # Parse available groups for Admin Dropdown
+        all_groups = [g.strip() for g in (course.group_names or "").split(",") if g.strip()]
+        if not all_groups: all_groups = ["A", "B"]
+    
+        return templates.TemplateResponse("learn.html", {
+            "all_groups": all_groups,
+            "request": request, 
+            "vocab_list": vocab_subset, 
+            "course_id": course_id,
+            "is_admin": is_admin,
+            "group": group,
+            "is_completed": is_completed,
+            "current_stage_name": current_stage_name,
+            "stage_index": stage_index,
+            "is_last_stage": is_last_stage,
+            "next_stage_index": next_stage_index,
+            "attempt_count": attempt_count,
+            "preview_group": preview_group # Pass to template to persist links
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(content=f"Error in learn page: {str(e)}<br><pre>{traceback.format_exc()}</pre>", status_code=500)
 
-    # Check if quiz taken
-    has_result = db.query(QuizResult).filter(QuizResult.user_id == user.id, QuizResult.course_id == course_id).first() is not None
-    is_completed = has_result and not is_admin and not preview_group
-
-    # Parse available groups for Admin Dropdown
-    all_groups = [g.strip() for g in (course.group_names or "").split(",") if g.strip()]
-    if not all_groups: all_groups = ["A", "B"]
-
-    return templates.TemplateResponse("learn.html", {
-        "all_groups": all_groups,
-        "request": request, 
-        "vocab_list": vocab_subset, 
-        "course_id": course_id,
-        "is_admin": is_admin,
-        "group": group,
-        "is_completed": is_completed,
-        "current_stage_name": current_stage_name,
-        "stage_index": stage_index,
-        "is_last_stage": is_last_stage,
-        "next_stage_index": next_stage_index,
-        "preview_group": preview_group # Pass to template to persist links
-    })
+@app.get("/student_results/{course_id}", response_class=HTMLResponse)
+async def student_results(course_id: int):
+    # Deprecated route: Redirect to new unified analytics
+    return RedirectResponse(url=f"/analytics/{course_id}", status_code=301)
 
 @app.get("/quiz/{course_id}", response_class=HTMLResponse)
 async def quiz_page(course_id: int, request: Request, preview_group: str = None, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
@@ -600,6 +723,10 @@ async def quiz_page(course_id: int, request: Request, preview_group: str = None,
     if not course or course.is_deleted:
         return RedirectResponse(url="/courses")
     quiz_config = course.quiz_config if course and course.quiz_config else "[]"
+    
+    # Check prior results for Analytics
+    prior_results = db.query(QuizResult).filter(QuizResult.user_id == user.id, QuizResult.course_id == course_id, QuizResult.is_deleted == False).count()
+    attempt_count = prior_results + 1
     
     # --- LEGACY VOCAB LOGIC (Fallback) ---
     vocab_list = db.query(Vocabulary).filter(
@@ -648,11 +775,74 @@ async def quiz_page(course_id: int, request: Request, preview_group: str = None,
         "quiz_time_limit": course.quiz_time_limit,
         "preview_group": preview_group,
         "group": group,
-        "is_admin": is_admin
+        "is_admin": is_admin,
+        "attempt_count": attempt_count
+    })
+
+@app.get("/quiz_result/{course_id}/{result_id}", response_class=HTMLResponse)
+async def show_quiz_detailed_result(course_id: int, result_id: int, request: Request, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
+    if not user:
+        return RedirectResponse(url="/")
+        
+    result = db.query(QuizResult).filter(QuizResult.id == result_id, QuizResult.course_id == course_id).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="Result not found")
+        
+    course = db.query(Course).filter(Course.id == course_id).first()
+    
+    # Parse Details
+    import json
+    details_log = []
+    section_stats = {}
+    
+    try:
+        if result.open_ended_response and len(result.open_ended_response) > 5:
+             # Dynamic Quiz Log
+             details_log = json.loads(result.open_ended_response)
+        elif result.ai_scoring_json and len(result.ai_scoring_json) > 5:
+             # Legacy AI Log
+             ai_log = json.loads(result.ai_scoring_json)
+             for word, ai_data in ai_log.items():
+                 details_log.append({
+                     "section": "General",
+                     "question": f"Sentence for '{word}'",
+                     "user_answer": "...", 
+                     "correct_answer": f"AI Score: {ai_data.get('total_average')}, Comment: {ai_data.get('comment')}",
+                     "score": ai_data.get('total_average')
+                 })
+    except:
+        pass
+        
+    try:
+        if result.section_stats:
+            section_stats = json.loads(result.section_stats)
+    except: pass
+
+    nasa_details = {}
+    try:
+        if result.nasa_details_json:
+            nasa_details = json.loads(result.nasa_details_json)
+    except: pass
+    
+    return templates.TemplateResponse("quiz_result.html", {
+        "request": request,
+        "course": course,
+        "result": result,
+        "details_log": details_log,
+        "section_stats": section_stats,
+        "nasa_details": nasa_details
     })
 
 @app.post("/submit_quiz/{course_id}")
 async def submit_quiz(course_id: int, request: Request, preview_group: str = None, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
+    try:
+        return await _submit_quiz_logic(course_id, request, preview_group, user, db)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(content=f"Error submitting quiz: {str(e)}<br><pre>{traceback.format_exc()}</pre>", status_code=500)
+
+async def _submit_quiz_logic(course_id: int, request: Request, preview_group: str = None, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/")
     
@@ -743,7 +933,10 @@ async def submit_quiz(course_id: int, request: Request, preview_group: str = Non
                      target_image = block.get('image_url') or block.get('image')
                      target_meaning = block.get('meaning', '')
                      
-                     if user_ans:
+                     # Default if empty
+                     ai_result = {"total_average": 0, "comment": "No answer provided"}
+                     
+                     if user_ans and str(user_ans).strip():
                          ai_result = utils.score_sentence_ai(
                              target_word, 
                              user_ans, 
@@ -751,16 +944,21 @@ async def submit_quiz(course_id: int, request: Request, preview_group: str = Non
                              target_meaning, 
                              target_image
                          )
-                         score_val = ai_result.get("total_average", 0)
-                         current_q_score = float(score_val)
-                         # Consider a score >= 3 as "Correct" for binary stats
-                         if score_val >= 3.0: is_correct = True
                          
-                         correct_q += (score_val / 5.0) # Normalizing 0-5 to 0-1
-                         section_accumulator[current_section]["correct"] += (score_val / 5.0)
+                     score_val = ai_result.get("total_average", 0)
+                     current_q_score = float(score_val)
+                     # Consider a score >= 3 as "Correct" for binary stats
+                     if score_val >= 3.0: is_correct = True
                          
-                         # Log the detailed AI result for this question
-                         ai_results_log[f"q_{q_id}"] = ai_result
+                     correct_q += (score_val / 5.0) # Normalizing 0-5 to 0-1
+                     section_accumulator[current_section]["correct"] += (score_val / 5.0)
+                         
+                     # NEW: Accumulate raw sentence score for summary
+                     sentence_score += current_q_score
+                         
+                     # Log the detailed AI result for this question
+                     ai_results_log[f"q_{q_id}"] = ai_result
+
                 else:
                      if user_ans in corrects:
                          is_correct = True
@@ -858,30 +1056,55 @@ async def submit_quiz(course_id: int, request: Request, preview_group: str = Non
         server_stages = []
         if course.stage_config:
             try:
-                server_stages = json.loads(course.stage_config)
+                loaded_config = json.loads(course.stage_config)
+                if isinstance(loaded_config, list):
+                    server_stages = loaded_config
+                elif isinstance(loaded_config, dict):
+                    # Pick the specific group config, or Common, or just the first available one to be safe?
+                    # Ideally we use the user's group.
+                    server_stages = loaded_config.get(group, loaded_config.get("Common", []))
             except: pass
             
+        # Build Lookup for Existing Names
+        existing_names = set()
+        for s in server_stages:
+             n = s.get('title') or s.get('name')
+             if n: existing_names.add(n)
+
         for k, v in timings.items():
-            # k is usually string "0", "1"... or "Stage 1" (Legacy)
-            idx = int(k) if k.isdigit() else -1
+            # k is usually string "0", "1"... or "Stage 1" (Legacy/Frontend)
             
-            # Smart Naming Logic
+            # 1. Exact Match Strategy (High Priority)
+            # If the key ALREADY matches a configured name, assume it's correct.
+            # This handles cases where user named a stage "Stage 1" explicitly.
+            if k in existing_names:
+                mapped_timings[k] = v
+                continue
+
+            # 2. Index Mapping Strategy
+            idx = -1
+            if k.isdigit():
+                idx = int(k)
+            elif k.startswith("Stage ") and k[6:].isdigit():
+                # Frontend sends "Stage 1" for index 0
+                idx = int(k[6:]) - 1
+            
+            # Map Index to Config
             if idx != -1:
-                # Digital Index -> Look up config
-                stage_name = f"Stage {k}" # Default Fallback
+                stage_name = f"Stage {idx + 1}" # Default
                 if 0 <= idx < len(server_stages):
-                    stage_name = server_stages[idx].get('title', stage_name)
+                    cfg = server_stages[idx]
+                    stage_name = cfg.get('title') or cfg.get('name') or stage_name
             else:
-                # Non-digital Key (Already named)
+                # Non-digital, Non-matching key (Special or Legacy)
                 stage_name = k 
             
-            # Special Keys
+            # Special Keys Preservation
             if k == "Quiz": stage_name = "Quiz"
             elif k == "test_intro": stage_name = "Test Intro"
             elif idx != -1 and not (0 <= idx < len(server_stages)):
-                # Filter out numeric keys that are OUT OF BOUNDS of current config
-                # e.g. "Stage 5" when only 2 stages exist
-                continue 
+                # Out of bounds index, ignore
+                pass 
                 
             mapped_timings[stage_name] = v
             
@@ -892,6 +1115,11 @@ async def submit_quiz(course_id: int, request: Request, preview_group: str = Non
     
     # Save result
     user_response_json = locals().get('user_response_json', '{}')
+    # Calculate Attempt Number
+    existing_attempts = db.query(QuizResult).filter(QuizResult.user_id == user.id, QuizResult.course_id == course_id).count()
+    current_attempt = existing_attempts + 1
+
+    # Save Result
     new_res = QuizResult(
         user_id=user.id,
         course_id=course_id,
@@ -899,12 +1127,13 @@ async def submit_quiz(course_id: int, request: Request, preview_group: str = Non
         sentence_score=float(sentence_score),
         nasa_tlx_score=nasa_avg,
         nasa_details_json=json.dumps(nasa_details),
-        learning_duration_seconds=learning_duration,
+        group=group,
+        learning_duration_seconds=learning_duration, # Total calculated
         stage_timing_json=stage_timing_json,
-        ai_scoring_json=json.dumps(ai_results_log, ensure_ascii=False),
         section_stats=json.dumps(section_stats, ensure_ascii=False),
+        ai_scoring_json=json.dumps(ai_results_log, ensure_ascii=False),
         open_ended_response=user_response_json,
-        group=group # Persist the group choice (Admin Preview or Enrolled)
+        attempt=current_attempt 
     )
     db.add(new_res)
     db.commit()
@@ -919,13 +1148,15 @@ async def submit_quiz(course_id: int, request: Request, preview_group: str = Non
         link_text = f"Back to Preview ({preview_group})"
         msg = f"Preview Submitted! Score: {trans_score}% (Dynamic) or {trans_score}/{sentence_score} (Legacy)"
 
-    return templates.TemplateResponse("message.html", {
-        "request": request, 
-        "message": msg,
-        "link": link,
-        "link_text": link_text,
-        "is_admin": is_admin
-    })
+        return templates.TemplateResponse("message.html", {
+            "request": request, 
+            "message": msg,
+            "link": link,
+            "link_text": link_text
+        })
+    
+    # Redirect to Student Analytics Dashboard
+    return RedirectResponse(url=f"/analytics/{course_id}", status_code=303)
 
 @app.post("/api/image_interaction")
 async def track_image_interaction(
@@ -967,7 +1198,6 @@ async def track_image_interaction(
                 context=context
             )
             db.add(new_interaction)
-    else:
         # For views, always create new record
         new_interaction = ImageInteraction(
             user_id=user.id,

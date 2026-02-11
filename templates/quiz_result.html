@@ -1,0 +1,136 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ course.name }} - Attempt #{{ result.attempt }} Details</h2>
+        <a href="/student_results/{{ course.id }}" class="btn btn-outline-secondary">Back to Analytics</a>
+    </div>
+
+    <!-- Summary Card -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Performance Summary</h5>
+        </div>
+        <div class="card-body">
+            <!-- Scores Row -->
+            <div class="row text-center mb-3">
+                <div class="col-md-4 border-end">
+                    <h6 class="text-muted">Total Score</h6>
+                    <div class="display-6 fw-bold">{{ result.translation_score + result.sentence_score }}</div>
+                </div>
+
+                {% if section_stats %}
+                {% for sec, score in section_stats.items() %}
+                <div class="col-md-{{ 8 // section_stats|length }} {% if not loop.last %}border-end{% endif %}">
+                    <h6 class="text-muted">{{ sec }}</h6>
+                    <div class="display-6">{{ score }}%</div>
+                </div>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            <hr>
+
+            <!-- NASA-TLX Row -->
+            <h6 class="text-muted text-center mb-3">NASA-TLX Workload Breakdown</h6>
+            <div class="row text-center">
+                <div class="col-md-2 border-end">
+                    <small class="text-muted d-block">Mental</small>
+                    <span class="fs-5 fw-bold">{{ nasa_details.mental|default(0)|round(1) }}</span>
+                </div>
+                <div class="col-md-2 border-end">
+                    <small class="text-muted d-block">Physical</small>
+                    <span class="fs-5 fw-bold">{{ nasa_details.physical|default(0)|round(1) }}</span>
+                </div>
+                <div class="col-md-2 border-end">
+                    <small class="text-muted d-block">Temporal</small>
+                    <span class="fs-5 fw-bold">{{ nasa_details.temporal|default(0)|round(1) }}</span>
+                </div>
+                <div class="col-md-2 border-end">
+                    <small class="text-muted d-block">Performance</small>
+                    <span class="fs-5 fw-bold">{{ nasa_details.performance|default(0)|round(1) }}</span>
+                </div>
+                <div class="col-md-2 border-end">
+                    <small class="text-muted d-block">Effort</small>
+                    <span class="fs-5 fw-bold">{{ nasa_details.effort|default(0)|round(1) }}</span>
+                </div>
+                <div class="col-md-2">
+                    <small class="text-muted d-block">Frustration</small>
+                    <span class="fs-5 fw-bold">{{ nasa_details.frustration|default(0)|round(1) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section Breakdown -->
+    {% if section_stats %}
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">Section Breakdown</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                {% for sec, score in section_stats.items() %}
+                <div class="col-md-4 mb-3">
+                    <div class="border rounded p-3 text-center h-100">
+                        <small class="text-muted">{{ sec }}</small>
+                        <h4 class="mb-0 text-primary">{{ score }}%</h4>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Detailed Q&A Log -->
+    <div class="card shadow-sm mb-5">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">Detailed Question Log</h5>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 15%">Section</th>
+                        <th style="width: 30%">Question</th>
+                        <th style="width: 25%">Your Answer</th>
+                        <th style="width: 25%">Correct Answer / Feedback</th>
+                        <th style="width: 5%">Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in details_log %}
+                    <tr class="{% if item.is_correct %}table-success{% else %}table-warning{% endif %}">
+                        <td><span class="badge bg-secondary">{{ item.section }}</span></td>
+                        <td>{{ item.question }}</td>
+                        <td class="text-break">{{ item.user_answer }}</td>
+                        <td class="text-break">
+                            {% if item.correct_answer %}
+                            {{ item.correct_answer }}
+                            {% else %}
+                            <span class="text-muted fst-italic">No correct answer defined</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center fw-bold">
+                            {% if item.score is number %}
+                            {{ item.score|round(1) }}
+                            {% else %}
+                            {{ item.score }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-4">
+                            No detailed log available for this attempt.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

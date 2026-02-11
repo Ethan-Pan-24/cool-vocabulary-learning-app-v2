@@ -29,8 +29,14 @@ class Course(Base):
     quiz_time_limit = Column(Integer, default=5) # Minutes, 0 for unlimited
     is_deleted = Column(Boolean, default=False)
     
+    # New fields for User-Created Courses
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    is_public = Column(Boolean, default=False)
+    hashtags = Column(String, nullable=True) # e.g. "Gept,Toefl"
+
     vocabularies = relationship("Vocabulary", back_populates="course")
     enrollments = relationship("Enrollment", back_populates="course")
+    creator = relationship("User", foreign_keys=[creator_id])
 
 class Enrollment(Base):
     __tablename__ = "enrollments"
@@ -75,6 +81,7 @@ class QuizResult(Base):
     is_deleted = Column(Boolean, default=False)
     
     learning_duration_seconds = Column(Float, default=0.0) # Total duration
+    attempt = Column(Integer, default=1) # Attempt number
     stage_timing_json = Column(Text, default="{}") # JSON: {"Stage 1": 120, "Stage 2": 90}
     section_stats = Column(Text, default="{}") # JSON: {"Translation": 80, "Sentence": 50, "Part A": 100}
 
@@ -95,6 +102,21 @@ class ImageInteraction(Base):
     action = Column(String)  # "like", "dislike", "view"
     timestamp = Column(DateTime, default=datetime.utcnow)
     context = Column(String, nullable=True)  # "learning", "quiz"
+
+class ImageRating(Base):
+    __tablename__ = "image_ratings"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    course_id = Column(Integer, ForeignKey("courses.id"))
+    vocab_id = Column(Integer, ForeignKey("vocabulary.id"), nullable=True)
+    image_url = Column(String)
+    rating = Column(Integer)  # 1 for like, -1 for dislike, 0 for neutral/unrated
+    rated_at = Column(DateTime, default=datetime.utcnow)
+    question_context = Column(String, nullable=True)  # "vocab", "quiz_section_name", etc.
+    
+    user = relationship("User")
+    course = relationship("Course")
+    vocabulary = relationship("Vocabulary")
 
 def get_db():
     db = SessionLocal()

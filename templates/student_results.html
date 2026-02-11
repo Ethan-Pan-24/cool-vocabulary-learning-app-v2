@@ -1,0 +1,167 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ course.name }} - My Learning Analytics</h2>
+        <a href="/courses" class="btn btn-outline-secondary">Back to Courses</a>
+    </div>
+
+    <!-- Summary Card -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-body">
+            <h5 class="card-title">Learning Overview</h5>
+            <div class="row text-center">
+                <div class="col-md-3">
+                    <div class="display-6">{{ latest_result.translation_score + latest_result.sentence_score }}</div>
+                    <div class="text-muted">Latest Score</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="display-6">{{ attempts|length }}</div>
+                    <div class="text-muted">Total Attempts</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="display-6">
+                        {{ (latest_result.learning_duration_seconds // 60)|int }}:{{
+                        "%02d"|format(latest_result.learning_duration_seconds % 60)|int }}
+                    </div>
+                    <div class="text-muted">Latest Study Duration</div>
+                </div>
+                <!-- Placeholder for future class avg -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Chart -->
+    {% if attempts|length > 1 %}
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">Growth Trend (Attempts Analysis)</h5>
+        </div>
+        <div class="card-body">
+            <canvas id="progressChart" width="400" height="150"></canvas>
+            <p class="text-muted small mt-2 text-center">
+                * Shows total scores across attempts to track improvement.
+            </p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Attempt History Table -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">Quiz History</h5>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Attempt</th>
+                        <th>Date</th>
+                        <th>Total Score</th>
+                        <th>Translation Score</th>
+                        <th>Sentence Score</th>
+                        <th>NASA-TLX</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in attempts %}
+                    <tr class="{% if item.is_latest %}table-success{% endif %}">
+                        <td>
+                            <span class="badge bg-secondary rounded-pill">#{{ item.attempt_num }}</span>
+                            {% if item.is_latest %}<span class="badge bg-success ms-1">Latest</span>{% endif %}
+                        </td>
+                        <td>{{ item.submitted_at_str }}</td>
+                        <td class="fw-bold">{{ item.total_score }}</td>
+                        <td>{{ item.result.translation_score }}</td>
+                        <td>{{ item.result.sentence_score }}</td>
+                        <td>{{ item.result.nasa_tlx_score }}</td>
+                        <td>
+                            <!-- Link to Detailed Result View -->
+                            <a href="/quiz_result/{{ course.id }}/{{ item.result.id }}"
+                                class="btn btn-sm btn-outline-primary">
+                                View Details
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="text-center mb-5">
+        <a href="/quiz/{{ course.id }}" class="btn btn-primary btn-lg px-5">
+            <i class="bi bi-arrow-repeat"></i> Retake Quiz
+        </a>
+    </div>
+
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    {% if attempts | length > 1 %}
+    const ctx = document.getElementById('progressChart').getContext('2d');
+
+    // Data Preparation
+    const labels = [{% for item in attempts %}"Attempt {{ item.attempt_num }}", {% endfor %}];
+    const scores = [{% for item in attempts %}{ { item.total_score } }, {% endfor %}];
+    const nasa = [{% for item in attempts %}{ { item.result.nasa_tlx_score } }, {% endfor %}];
+
+    const progressChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Total Score',
+                    data: scores,
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'NASA-TLX Load',
+                    data: nasa,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderDash: [5, 5],
+                    tension: 0.1,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: { display: true, text: 'Score' },
+                    suggestedMin: 0
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: { display: true, text: 'Load Index' },
+                    grid: {
+                        drawOnChartArea: false,
+                    },
+                    suggestedMin: 0,
+                    suggestedMax: 100
+                }
+            }
+        }
+    });
+    {% endif %}
+</script>
+{% endblock %}

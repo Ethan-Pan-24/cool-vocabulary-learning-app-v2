@@ -18,17 +18,22 @@ try:
         data = response.json()
         if "error" in data:
             print(f"ERROR: {data['error']}")
+        elif "sections" in data:
+            print("SUCCESS! Found sections.")
+            for sec_name, sec_data in data["sections"].items():
+                print(f"\n--- Section: {sec_name} ---")
+                print(f"- Has image: {'image' in sec_data}")
+                print(f"- Has statistics: {'statistics' in sec_data}")
+                if 'statistics' in sec_data:
+                    stats = sec_data['statistics']
+                    print(f"  Statistics keys: {list(stats.keys())}")
+                    if 'descriptive' in stats:
+                        desc = stats['descriptive']
+                        print(f"  Total students: {desc.get('total_students')}")
+                        print(f"  Num groups: {desc.get('num_groups')}")
         else:
-            print("SUCCESS!")
-            print(f"- Has image: {'image' in data}")
-            print(f"- Has statistics: {'statistics' in data}")
-            if 'statistics' in data:
-                stats = data['statistics']
-                print(f"\nStatistics keys: {stats.keys()}")
-                if 'descriptive' in stats:
-                    desc = stats['descriptive']
-                    print(f"Total students: {desc.get('total_students')}")
-                    print(f"Num groups: {desc.get('num_groups')}")
+            print("UNEXPECTED RESPONSE FORMAT:")
+            print(json.dumps(data, indent=2))
     else:
         print(f"Error response:")
         try:

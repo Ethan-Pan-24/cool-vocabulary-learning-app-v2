@@ -1,57 +1,695 @@
 {% extends "layout.html" %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12 mb-4">
-        <h1>Available Courses</h1>
-        <p class="text-muted">Select a course to start learning.</p>
+<div class="row align-items-center mb-4">
+    <div class="col-md-8">
+        <h1>Explore Courses</h1>
+        <p class="text-muted">Choose a course from the official curriculum or community shared content.</p>
+    </div>
+    <div class="col-md-4 text-md-end">
+        <button class="btn btn-outline-secondary me-2" onclick="openRecycleBin()">
+            <i class="bi bi-trash"></i> Recycle Bin
+        </button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createCourseModal">
+            <i class="bi bi-plus-circle"></i> Create Your Course
+        </button>
     </div>
 </div>
 
-<div class="row">
-    {% for course in courses %}
-    <div class="col-md-4 mb-4">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <h5 class="card-title">{{ course.name }}</h5>
-                <p class="card-text">{{ course.description }}</p>
-                <p class="text-muted small">Groups: {{ course.group_names }}</p>
-            </div>
-            <div class="card-footer bg-white border-top-0">
-                {% if is_admin %}
-                <div class="mb-2">
-                    <label class="small text-muted">Preview Group:</label>
-                    <select class="form-select form-select-sm" id="group_select_{{ course.id }}">
-                        {% for g in course.group_names.split(',') %}
-                        <option value="{{ g.strip() }}">{{ g.strip() }}</option>
-                        {% endfor %}
-                    </select>
+<!-- Tabs -->
+<ul class="nav nav-pills mb-4" id="courseTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="official-tab" data-bs-toggle="pill" data-bs-target="#official" type="button"
+            role="tab">
+            <i class="bi bi-patch-check"></i> Official Content
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="community-tab" data-bs-toggle="pill" data-bs-target="#community" type="button"
+            role="tab">
+            <i class="bi bi-people"></i> Community Shared
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="created-tab" data-bs-toggle="pill" data-bs-target="#created" type="button"
+            role="tab">
+            <i class="bi bi-person-workspace"></i> Created by You
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="joined-tab" data-bs-toggle="pill" data-bs-target="#joined" type="button"
+            role="tab">
+            <i class="bi bi-journal-bookmark"></i> Joined Courses
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="courseTabContent">
+    <!-- Official Courses -->
+    <div class="tab-pane fade show active" id="official" role="tabpanel">
+        <div class="row">
+            {% for course in official_courses %}
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary fw-bold">{{ course.name }}</h5>
+                        <p class="card-text text-truncate">{{ course.description }}</p>
+                        {% if course.hashtags %}
+                        <div class="mb-2">
+                            {% for tag in course.hashtags.split(',') %}
+                            <span class="badge bg-light text-dark border"><i class="bi bi-hash"></i>{{ tag.strip()
+                                }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-footer bg-white border-top-0">
+                        {% if is_admin %}
+                        <div class="mb-2">
+                            <label class="small text-muted">Preview Group:</label>
+                            <select class="form-select form-select-sm" id="group_select_{{ course.id }}">
+                                {% for g in course.group_names.split(',') %}
+                                <option value="{{ g.strip() }}">{{ g.strip() }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-warning flex-grow-1" onclick="previewCourse({{ course.id }})">
+                                <i class="bi bi-eye"></i> Preview
+                            </button>
+                            <a href="/admin/course/{{ course.id }}/content_manager" class="btn btn-outline-secondary">
+                                <i class="bi bi-gear"></i>
+                            </a>
+                        </div>
+                        {% elif course.id in user_course_ids %}
+                        <a href="/learn/{{ course.id }}" class="btn btn-success w-100 mb-2">Continue Learning</a>
+                        {% else %}
+                        <a href="/join/{{ course.id }}" class="btn btn-primary w-100">Join Course</a>
+                        {% endif %}
+                    </div>
                 </div>
-                <button class="btn btn-warning w-100" onclick="previewCourse({{ course.id }})">
-                    <i class="bi bi-eye"></i> Preview Course
+            </div>
+            {% else %}
+            <div class="col-12 text-center py-5">
+                <p class="text-muted">No official courses available yet.</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Community Courses -->
+    <div class="tab-pane fade" id="community" role="tabpanel">
+        <!-- Search and Filter -->
+        <div class="row mb-3 align-items-center">
+            <div class="col-md-5 mb-2">
+                <div class="input-group">
+                    <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                    <input type="text" class="form-control border-start-0 ps-0" id="courseSearch"
+                        placeholder="Search courses..." oninput="filterCourses()">
+                </div>
+            </div>
+            <div class="col-md-7 mb-2">
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                    <small class="text-muted me-2"><i class="bi bi-funnel"></i> Filters:</small>
+                    <div id="tagFilters" class="d-flex flex-wrap gap-1">
+                        <!-- Dynamic hashtags -->
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary rounded-pill" onclick="clearFilters()"
+                        id="clearFiltersBtn" style="display:none;">
+                        <i class="bi bi-x"></i> Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="row" id="communityCourseList">
+            {% for course in community_courses %}
+            <div class="col-md-4 mb-4 community-course-item" data-name="{{ course.name.lower() }}"
+                data-hashtags="{{ course.hashtags.lower() if course.hashtags else '' }}">
+                <div class="card h-100 shadow-sm border-info-subtle">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <h5 class="card-title text-info fw-bold">{{ course.name }}</h5>
+                            {% if course.creator_id == user_id %}
+                            <div>
+                                {% if not course.is_public %}
+                                <span class="badge bg-secondary me-1"><i class="bi bi-lock-fill"></i> Private</span>
+                                {% else %}
+                                <span class="badge bg-success me-1"><i class="bi bi-globe"></i> Public</span>
+                                {% endif %}
+                                <span class="badge bg-info text-dark">Your Course</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <p class="card-text text-truncate">{{ course.description }}</p>
+                        {% if course.hashtags %}
+                        <div class="mb-2">
+                            {% for tag in course.hashtags.split(',') %}
+                            <span class="badge bg-info-subtle text-info border border-info"><i class="bi bi-hash"></i>{{
+                                tag.strip() }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <div class="text-muted small">
+                            <i class="bi bi-person"></i> Created by: {{ course.creator.email.split('@')[0] if
+                            course.creator else 'Unknown' }}
+                        </div>
+                    </div>
+                    <div class="card-footer bg-white border-top-0">
+                        {% if course.id in user_course_ids %}
+                        <a href="/learn/{{ course.id }}" class="btn btn-success w-100 mb-2">Continue Learning</a>
+                        {% else %}
+                        <a href="/join/{{ course.id }}" class="btn btn-outline-info w-100 mb-2">Join Content</a>
+                        {% endif %}
+
+                        {% if course.creator_id == user_id or is_admin %}
+                        <div class="d-flex gap-2">
+                            <a href="/admin/course/{{ course.id }}/content_manager"
+                                class="btn btn-sm btn-outline-secondary flex-grow-1">
+                                <i class="bi bi-pencil-square"></i> Manage Content
+                            </a>
+                            <button class="btn btn-sm btn-outline-warning"
+                                onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }})'>
+                                <i class="bi bi-gear"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger"
+                                onclick='deleteCourse({{ course.id }}, {{ course.name|tojson|safe }})'>
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="col-12 text-center py-5">
+                <p class="text-muted">No community courses shared yet. Be the first to create one!</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Created by You -->
+    <div class="tab-pane fade" id="created" role="tabpanel">
+        <div class="row">
+            {% if created_courses %}
+            {% for course in created_courses %}
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 shadow-sm border-primary-subtle">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <h5 class="card-title text-primary fw-bold">{{ course.name }}</h5>
+                            <div>
+                                {% if not course.is_public %}
+                                <span class="badge bg-secondary me-1"><i class="bi bi-lock-fill"></i> Private</span>
+                                {% else %}
+                                <span class="badge bg-success me-1"><i class="bi bi-globe"></i> Public</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <p class="card-text text-truncate">{{ course.description }}</p>
+                        {% if course.hashtags %}
+                        <div class="mb-2">
+                            {% for tag in course.hashtags.split(',') %}
+                            <span class="badge bg-primary-subtle text-primary border border-primary"><i
+                                    class="bi bi-hash"></i>{{ tag.strip() }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-footer bg-white border-top-0">
+                        <div class="d-flex gap-2">
+                            <a href="/admin/course/{{ course.id }}/content_manager"
+                                class="btn btn-sm btn-outline-secondary flex-grow-1">
+                                <i class="bi bi-pencil-square"></i> Manage Content
+                            </a>
+                            <button class="btn btn-sm btn-outline-warning"
+                                onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }})'>
+                                <i class="bi bi-gear"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger"
+                                onclick='deleteCourse({{ course.id }}, {{ course.name|tojson|safe }})'>
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="col-12 text-center py-5">
+                <p class="text-muted">You haven't created any courses yet.</p>
+                <button class="btn btn-primary mt-2" data-bs-toggle="modal" data-bs-target="#createCourseModal">
+                    <i class="bi bi-plus-circle"></i> Create Your First Course
                 </button>
-                {% elif course.id in user_course_ids %}
-                <a href="/learn/{{ course.id }}" class="btn btn-success w-100">Continue Learning</a>
-                {% else %}
-                <a href="/join/{{ course.id }}" class="btn btn-primary w-100">Join Course</a>
-                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Joined Courses -->
+    <div class="tab-pane fade" id="joined" role="tabpanel">
+        <div class="row">
+            {% if joined_courses %}
+            {% for course in joined_courses %}
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 shadow-sm border-success-subtle">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <h5 class="card-title text-success fw-bold">{{ course.name }}</h5>
+                            <div class="mb-2">
+                                {% if course.id in official_course_ids %}
+                                <span class="badge bg-primary"><i class="bi bi-patch-check-fill"></i> Official</span>
+                                {% else %}
+                                <span class="badge bg-info text-dark"><i class="bi bi-people-fill"></i> Community</span>
+                                {% endif %}
+                                {% if course.creator_id == user_id %}
+                                <span class="badge bg-warning text-dark">Your Course</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <p class="card-text text-truncate">{{ course.description }}</p>
+                        {% if course.hashtags %}
+                        <div class="mb-2">
+                            {% for tag in course.hashtags.split(',') %}
+                            <span class="badge bg-success-subtle text-success border border-success"><i
+                                    class="bi bi-hash"></i>{{ tag.strip() }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-footer bg-white border-top-0">
+                        <a href="/learn/{{ course.id }}" class="btn btn-success w-100 mb-2">Continue Learning</a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="col-12 text-center py-5">
+                <p class="text-muted">You haven't joined any courses yet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Create Course Modal -->
+<div class="modal fade" id="createCourseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Create New Course</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div id="createCourseAlert" class="alert alert-danger d-none mx-3 mt-3"></div>
+            <form id="createCourseForm"
+                onsubmit="event.preventDefault(); handleCourseSubmit('createCourseForm', '/admin_api/create_course', 'createCourseAlert');">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Course Name</label>
+                        <input type="text" name="name" class="form-control" required placeholder="e.g. My TOEIC Set 1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea name="description" class="form-control" rows="2"
+                            placeholder="Briefly describe what this course covers..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Hashtags</label>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            {% for tag in ['Gept', 'Toefl', 'Toeic', '學測'] %}
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input tag-checkbox" type="checkbox" value="{{ tag }}"
+                                    id="tag_{{ tag }}">
+                                <label class="form-check-label" for="tag_{{ tag }}">{{ tag }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <input type="hidden" name="hashtags" id="hashtags_input">
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_public" value="true"
+                                id="isPublicSwitch" checked>
+                            <label class="form-check-label" for="isPublicSwitch">Public (Other learners can see and
+                                join)</label>
+                        </div>
+                        <p class="small text-muted mt-1">If private, only you can see this course.</p>
+                    </div>
+                    <input type="hidden" name="groups" value="Common">
+                    <input type="hidden" name="quiz_time_limit" value="0">
+                    <input type="hidden" name="redirect_to" value="/courses#community">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Course</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Course Modal (Reuse/Generic) -->
+<div class="modal fade" id="editCourseSettingsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title">Edit Course Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div id="editCourseAlert" class="alert alert-danger d-none mx-3 mt-3"></div>
+            <form id="editCourseForm"
+                onsubmit="event.preventDefault(); var url = this.getAttribute('action'); handleCourseSubmit('editCourseForm', url, 'editCourseAlert');">
+                <div class="modal-body">
+                    <input type="hidden" name="redirect_to" value="/courses">
+                    <div class="mb-3">
+                        <label class="form-label">Course Name</label>
+                        <input type="text" name="name" id="edit_name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea name="description" id="edit_description" class="form-control" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Hashtags</label>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            {% for tag in ['Gept', 'Toefl', 'Toeic', '學測'] %}
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input edit-tag-checkbox" type="checkbox" value="{{ tag }}"
+                                    id="edit_tag_{{ tag }}">
+                                <label class="form-check-label" for="edit_tag_{{ tag }}">{{ tag }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <input type="hidden" name="hashtags" id="edit_hashtags_input">
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_public" value="true"
+                                id="edit_is_public">
+                            <label class="form-check-label" for="edit_is_public">Public</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Recycle Bin Modal -->
+<div class="modal fade" id="recycleBinModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-secondary text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> Recycle Bin</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="recycleBinContent">
+                    <p class="text-center text-muted">Loading...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
-    {% else %}
-    <div class="col-12">
-        <div class="alert alert-info">No courses available yet. Please ask an admin to create one.</div>
-    </div>
-    {% endfor %}
 </div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var hash = window.location.hash;
+        if (hash) {
+            var triggerEl = document.querySelector('button[data-bs-target="' + hash + '"]');
+            if (triggerEl) {
+                var tab = new bootstrap.Tab(triggerEl);
+                tab.show();
+            }
+        }
+    });
+
     function previewCourse(id) {
         const sel = document.getElementById('group_select_' + id);
         const group = sel ? sel.value : 'A';
         window.location.href = `/learn/${id}?preview_group=${encodeURIComponent(group)}`;
+    }
+
+    function updateHashtags() {
+        const tags = Array.from(document.querySelectorAll('.tag-checkbox:checked')).map(cb => cb.value);
+        document.getElementById('hashtags_input').value = tags.join(',');
+    }
+
+    function updateEditHashtags() {
+        const tags = Array.from(document.querySelectorAll('.edit-tag-checkbox:checked')).map(cb => cb.value);
+        document.getElementById('edit_hashtags_input').value = tags.join(',');
+    }
+
+    function editCourseSettings(id, name, desc, tags, isPublic) {
+        document.getElementById('editCourseForm').action = `/admin_api/update_course/${id}`;
+        document.getElementById('edit_name').value = name;
+        document.getElementById('edit_description').value = desc;
+        // isPublic passed as boolean from template
+        document.getElementById('edit_is_public').checked = isPublic;
+
+        // Ensure redirect points to community tab
+        document.querySelector('#editCourseForm input[name="redirect_to"]').value = "/courses#community";
+
+        // Reset checkboxes
+        document.querySelectorAll('.edit-tag-checkbox').forEach(cb => cb.checked = false);
+        // Set checkboxes
+        if (tags) {
+            tags.split(',').forEach(tag => {
+                const cb = document.getElementById(`edit_tag_${tag.trim()}`);
+                if (cb) cb.checked = true;
+            });
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('editCourseSettingsModal'));
+        modal.show();
+    }
+
+    async function handleCourseSubmit(formId, url, alertId) {
+        // Update hashtags hidden input before submit
+        if (formId === 'createCourseForm') updateHashtags();
+        if (formId === 'editCourseForm') updateEditHashtags();
+
+        const form = document.getElementById(formId);
+        const formData = new FormData(form);
+        const alertBox = document.getElementById(alertId);
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.redirected || response.ok) {
+                window.location.hash = 'community';
+                window.location.reload();
+                return;
+            }
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.detail || 'An error occurred');
+            }
+
+            // Fallback if no redirect but success (shouldn't happen with current backend)
+            window.location.reload();
+        } catch (error) {
+            alertBox.textContent = error.message;
+            alertBox.classList.remove('d-none');
+        }
+    }
+
+    async function deleteCourse(id, name) {
+        if (confirm(`Are you sure you want to delete course "${name}"? This action cannot be undone.`)) {
+            try {
+                const response = await fetch(`/admin_api/delete_course/${id}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert('Error deleting course: ' + (data.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error deleting course: ' + error.message);
+            }
+        }
+    }
+
+    async function openRecycleBin() {
+        const modal = new bootstrap.Modal(document.getElementById('recycleBinModal'));
+        modal.show();
+        loadRecycleBin();
+    }
+
+    async function loadRecycleBin() {
+        const container = document.getElementById('recycleBinContent');
+        container.innerHTML = '<p class="text-center text-muted">Loading...</p>';
+
+        try {
+            const response = await fetch('/admin_api/web_deleted_courses');
+            const courses = await response.json();
+
+            if (courses.length === 0) {
+                container.innerHTML = '<p class="text-center text-muted">Recycle bin is empty.</p>';
+                return;
+            }
+
+            let html = '<div class="list-group">';
+            courses.forEach(c => {
+                html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-1">${c.name}</h6>
+                        <small class="text-muted">${c.description || 'No description'}</small>
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-success me-2" onclick="restoreCourse(${c.id})">
+                            <i class="bi bi-arrow-counterclockwise"></i> Restore
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="permanentlyDeleteCourse(${c.id}, '${c.name.replace(/'/g, "\\'")}')">
+                            <i class="bi bi-x-lg"></i> Delete Forever
+                        </button>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (error) {
+            container.innerHTML = '<p class="text-center text-danger">Error loading recycle bin.</p>';
+        }
+    }
+
+    async function restoreCourse(id) {
+        if (!confirm('Restore this course?')) return;
+        try {
+            const resp = await fetch(`/admin_api/restore_course/${id}`, { method: 'POST' });
+            if (resp.ok) {
+                loadRecycleBin();
+                // Optional: reload page to see restored course, or just stay in modal
+                if (confirm('Course restored. Reload page to see it?')) window.location.reload();
+            } else {
+                alert('Failed to restore course');
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    async function permanentlyDeleteCourse(id, name) {
+        if (!confirm(`Permanently delete "${name}"? This cannot be undone!`)) return;
+        try {
+            const resp = await fetch(`/admin_api/permanently_delete_course/${id}`, { method: 'POST' });
+            if (resp.ok) {
+                loadRecycleBin();
+            } else {
+                alert('Failed to delete course');
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+    // Filter Logic
+    let activeTag = null;
+
+    document.addEventListener("DOMContentLoaded", function () {
+        // Collect all hashtags from community courses
+        const courses = document.querySelectorAll('.community-course-item');
+        const allTags = new Set();
+
+        courses.forEach(course => {
+            const tagStr = course.dataset.hashtags;
+            if (tagStr) {
+                tagStr.split(',').forEach(t => {
+                    const cleanTag = t.trim();
+                    if (cleanTag) allTags.add(cleanTag);
+                });
+            }
+        });
+
+        // Render tag buttons
+        const tagContainer = document.getElementById('tagFilters');
+        if (tagContainer) {
+            allTags.forEach(tag => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-sm btn-outline-info rounded-pill tag-filter-btn';
+                btn.innerHTML = `<i class="bi bi-hash"></i> ${tag}`;
+                btn.onclick = () => toggleTagFilter(btn, tag);
+                tagContainer.appendChild(btn);
+            });
+        }
+    });
+
+    function toggleTagFilter(btn, tag) {
+        if (activeTag === tag) {
+            // Deactivate
+            activeTag = null;
+            btn.classList.remove('active', 'bg-info', 'text-white');
+            btn.classList.add('btn-outline-info');
+        } else {
+            // Activate
+            if (activeTag) {
+                // Remove active class from previous
+                const prev = document.querySelector('.tag-filter-btn.active');
+                if (prev) {
+                    prev.classList.remove('active', 'bg-info', 'text-white');
+                    prev.classList.add('btn-outline-info');
+                }
+            }
+            activeTag = tag;
+            btn.classList.remove('btn-outline-info');
+            btn.classList.add('active', 'bg-info', 'text-white');
+        }
+        filterCourses();
+    }
+
+    function filterCourses() {
+        const searchText = document.getElementById('courseSearch').value.toLowerCase();
+        const courses = document.querySelectorAll('.community-course-item');
+        let hasActiveFilters = searchText.length > 0 || activeTag !== null;
+
+        courses.forEach(course => {
+            const name = course.dataset.name;
+            const tags = course.dataset.hashtags;
+
+            const matchesSearch = name.includes(searchText);
+            const matchesTag = activeTag ? tags.includes(activeTag) : true;
+
+            if (matchesSearch && matchesTag) {
+                course.classList.remove('d-none');
+            } else {
+                course.classList.add('d-none');
+            }
+        });
+
+        // Show/Hide Clear Button
+        const clearBtn = document.getElementById('clearFiltersBtn');
+        if (clearBtn) clearBtn.style.display = hasActiveFilters ? 'inline-block' : 'none';
+    }
+
+    function clearFilters() {
+        document.getElementById('courseSearch').value = '';
+        if (activeTag) {
+            const prev = document.querySelector('.tag-filter-btn.active');
+            if (prev) {
+                prev.classList.remove('active', 'bg-info', 'text-white');
+                prev.classList.add('btn-outline-info');
+            }
+            activeTag = null;
+        }
+        filterCourses();
     }
 </script>
 {% endblock %}

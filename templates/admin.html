@@ -37,6 +37,10 @@
         <button class="nav-link" id="efficiency-tab" data-bs-toggle="tab" data-bs-target="#efficiency"
             type="button">Teaching Efficiency</button>
     </li>
+    <li class="nav-item">
+        <button class="nav-link" id="time-series-tab" data-bs-toggle="tab" data-bs-target="#timeSeries"
+            type="button">Time Series Analysis</button>
+    </li>
 </ul>
 
 <div class="tab-content" id="adminTabsContent">
@@ -93,7 +97,8 @@
                                     <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditModal(this)"
                                         data-id="{{ c.id }}" data-name="{{ c.name }}"
                                         data-description="{{ c.description or '' }}"
-                                        data-groups="{{ c.group_names or '' }}" data-time="{{ c.quiz_time_limit or 5 }}"
+                                        data-groups="{{ c.group_names or '' }}"
+                                        data-time="{{ c.quiz_time_limit if c.quiz_time_limit is not none else 5 }}"
                                         title="Edit Name/Time">
                                         <i class="bi bi-pencil-square"></i> Edit
                                     </button>
@@ -121,10 +126,16 @@
             <h4>Statistical Analysis</h4>
             <div class="row mb-3">
                 <div class="col-md-4">
-                    <select id="statsCourseId" class="form-select">
+                    <select id="statsCourseId" class="form-select" onchange="loadStatsAttempts()">
+                        <option value="" disabled selected>-- Select Course --</option>
                         {% for c in courses %}
                         <option value="{{ c.id }}">{{ c.name }}</option>
                         {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <select id="statsAttemptSelect" class="form-select">
+                        <option value="" disabled selected>-- Select Test --</option>
                     </select>
                 </div>
                 <div class="col-md-4">
@@ -133,7 +144,7 @@
             </div>
 
             <div id="statsContent">
-                <p class="text-muted">Select a course and click analyze.</p>
+                <p class="text-muted">Select a course and a test to analyze.</p>
             </div>
 
             <div id="plots" class="row"></div>
@@ -177,11 +188,17 @@
             <div class="row mb-3">
                 <div class="col-md-4">
                     <label class="form-label">Select Course</label>
-                    <select id="efficiencyCourseSelect" class="form-select">
+                    <select id="efficiencyCourseSelect" class="form-select" onchange="loadEfficiencyAttempts()">
                         <option value="">-- Select Course --</option>
                         {% for c in courses %}
                         <option value="{{ c.id }}">{{ c.name }}</option>
                         {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Filter by Test</label>
+                    <select id="efficiencyAttemptSelect" class="form-select">
+                        <option value="" disabled selected>-- Select Test --</option>
                     </select>
                 </div>
                 <div class="col-md-4 d-flex align-items-end">
@@ -192,6 +209,40 @@
             <div id="efficiencyResults" class="mt-4">
                 <p class="text-muted">Select a course and click "Generate Analysis" to view the efficiency quadrant
                     plot.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- TIME SERIES ANALYSIS TAB -->
+    <div class="tab-pane fade" id="timeSeries" role="tabpanel">
+        <div class="card p-4 shadow-sm">
+            <h4>📈 Time Series (Learning Trend) Analysis</h4>
+            <p class="text-muted">Analyze student performance trends across multiple test attempts.</p>
+
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Select Course</label>
+                    <select id="timeSeriesCourseSelect" class="form-select" onchange="resetTimeSeriesUI()">
+                        <option value="">-- Select Course --</option>
+                        {% for c in courses %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" onclick="loadAdminTimeSeries()">Load Trend Analysis</button>
+                </div>
+            </div>
+
+            <!-- Attempt Selector (Dynamic) -->
+            <div id="adminTimeSeriesControls" class="mb-4 p-3 bg-light rounded border" style="display: none;">
+                <label class="fw-bold mb-2">Select Tests to Analyze:</label>
+                <div id="adminTestCheckboxes" class="d-flex gap-3 flex-wrap"></div>
+                <button class="btn btn-primary btn-sm mt-2" onclick="loadAdminTimeSeries(true)">Update Analysis</button>
+            </div>
+
+            <div id="timeSeriesResults" class="mt-4">
+                <p class="text-muted">Select a course and click "Load Trend Analysis".</p>
             </div>
         </div>
     </div>
@@ -262,14 +313,50 @@
     }
 
     // Stats Logic
+    async function loadStatsAttempts() {
+        const courseId = document.getElementById('statsCourseId').value;
+        const attemptSelect = document.getElementById('statsAttemptSelect');
+        attemptSelect.innerHTML = '<option value="" disabled selected>-- Select Test --</option>';
+
+        if (!courseId) return;
+
+        try {
+            const response = await fetch(`/admin_api/course_attempts?course_id=${courseId}`);
+            const data = await response.json();
+
+            if (data.attempts && data.attempts.length > 0) {
+                data.attempts.forEach(a => {
+                    const option = document.createElement('option');
+                    option.value = a;
+                    option.textContent = `Test ${a}`;
+                    attemptSelect.appendChild(option);
+                });
+            }
+        } catch (e) {
+            console.error("Failed to load attempts", e);
+        }
+    }
+
     document.getElementById('refreshStats').onclick = async () => {
         const btn = document.getElementById('refreshStats');
         const courseId = document.getElementById('statsCourseId').value;
+        const attempt = document.getElementById('statsAttemptSelect').value;
+
+        if (!courseId) {
+            alert("Please select a course first.");
+            return;
+        }
+
+        if (!attempt) {
+            alert("Please select a specific test to analyze.");
+            return;
+        }
+
         btn.disabled = true;
         btn.textContent = "Processing...";
 
         try {
-            const resp = await fetch(`/admin_api/stats?course_id=${courseId}`);
+            const resp = await fetch(`/admin_api/stats?course_id=${courseId}&target_attempt=${attempt}`);
             const data = await resp.json();
 
             let html = '<div class="alert alert-light border">';
@@ -350,6 +437,14 @@
     function goToQuizEditor() {
         const id = document.getElementById('quizSelectorInput').value;
         if (id) window.location.href = `/admin/course/${id}/quiz_editor`;
+    }
+
+    // Help: Format seconds to mm:ss
+    function formatTime(seconds) {
+        if (seconds === null || seconds === undefined || isNaN(seconds)) return "-";
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
 
     // --- COURSE TRASH CAN LOGIC ---
@@ -627,24 +722,55 @@
     }
 
     // Teaching Efficiency Analysis (Paas 1993)
+    async function loadEfficiencyAttempts() {
+        const courseId = document.getElementById('efficiencyCourseSelect').value;
+        const attemptSelect = document.getElementById('efficiencyAttemptSelect');
+        attemptSelect.innerHTML = '<option value="" disabled selected>-- Select Test --</option>';
+
+        if (!courseId) return;
+
+        try {
+            const response = await fetch(`/admin_api/course_attempts?course_id=${courseId}`);
+            const data = await response.json();
+
+            if (data.attempts && data.attempts.length > 0) {
+                data.attempts.forEach(a => {
+                    const option = document.createElement('option');
+                    option.value = a;
+                    option.textContent = `Test ${a}`;
+                    attemptSelect.appendChild(option);
+                });
+            }
+        } catch (e) {
+            console.error("Failed to load attempts", e);
+        }
+    }
+
     async function loadEfficiencyAnalysis() {
         const courseId = document.getElementById('efficiencyCourseSelect').value;
+        const attempt = document.getElementById('efficiencyAttemptSelect').value;
 
         if (!courseId) {
             alert('Please select a course first.');
             return;
         }
 
+        if (!attempt) {
+            alert('Please select a specific test to analyze.');
+            return;
+        }
+
         const resultsDiv = document.getElementById('efficiencyResults');
-        resultsDiv.innerHTML = '<p class="text-muted"><i class="spinner-border spinner-border-sm"></i> Generating analysis...</p>';
+        resultsDiv.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary"></div><p class="mt-2">Analyzing data...</p></div>';
+
+        let url = `/admin_api/efficiency_plot?course_id=${courseId}&target_attempt=${attempt}`;
 
         try {
-            // Fetch plot and statistics
-            const resp = await fetch(`/admin_api/efficiency_plot?course_id=${courseId}`);
-            const data = await resp.json();
+            const response = await fetch(url);
+            const data = await response.json();
 
             if (data.error) {
-                resultsDiv.innerHTML = `<p class="text-danger">${data.error}</p>`;
+                resultsDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
                 return;
             }
 
@@ -776,6 +902,152 @@
                 </div>
             `;
         }
+    }
+
+    // --- Time Series Analysis (Admin) ---
+    let ADMIN_AVAILABLE_TESTS = [];
+
+    function resetTimeSeriesUI() {
+        document.getElementById('timeSeriesResults').innerHTML = '<p class="text-muted">Select a course and click "Load Trend Analysis".</p>';
+        document.getElementById('adminTimeSeriesControls').style.display = 'none';
+        ADMIN_AVAILABLE_TESTS = [];
+    }
+
+    async function loadAdminTimeSeries(useFilter = false) {
+        const courseId = document.getElementById('timeSeriesCourseSelect').value;
+        if (!courseId) {
+            alert("Please select a course first.");
+            return;
+        }
+
+        const container = document.getElementById('timeSeriesResults');
+        const controls = document.getElementById('adminTimeSeriesControls');
+
+        let url = `/admin_api/time_series_stats?course_id=${courseId}`;
+
+        // Add Filter
+        if (useFilter) {
+            const checkboxes = document.querySelectorAll('#adminTestCheckboxes input:checked');
+            if (checkboxes.length > 0) {
+                const selected = Array.from(checkboxes).map(cb => cb.value).join(',');
+                url += `&attempts=${selected}`;
+            } else {
+                alert("Please select at least one test.");
+                return;
+            }
+        }
+
+        container.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary"></div><p class="mt-2">Analyzing trends...</p></div>';
+
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(await response.text());
+            const data = await response.json();
+
+            if (data.msg) {
+                container.innerHTML = `<div class="alert alert-warning">${data.msg}</div>`;
+                return;
+            }
+
+            // 1. Update Controls
+            if (data.available_attempts && !useFilter) {
+                updateAdminTestsUI(data.available_attempts);
+                controls.style.display = 'block';
+            }
+
+            // 2. Render Content
+            let html = '';
+
+            // A. Summary Table
+            if (data.sections && data.sections.length > 0) {
+                // Get all unique columns (Time points) from the first section that has data
+                let columns = [];
+                const validSection = data.sections.find(s => s.table_data && s.table_data.length > 0);
+                if (validSection) {
+                    columns = validSection.table_data.map(d => d.Group);
+                }
+
+                html += `
+                <div class="table-responsive mb-4">
+                    <h6 class="fw-bold border-bottom pb-2">Descriptive Statistics & Inference</h6>
+                    <table class="table table-bordered table-hover text-center align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Section</th>
+                                ${columns.map(c => `<th>${c}<br><small>(Median(SD))</small></th>`).join('')}
+                                <th>p-value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.sections.forEach(sec => {
+                    const pVal = sec.stats.p_value ? sec.stats.p_value.toFixed(3) : "N/A";
+                    const sigClass = (sec.stats.p_value < 0.05) ? "text-danger fw-bold" : "";
+
+                    html += `<tr><td class="fw-bold text-start">${sec.name}</td>`;
+
+                    columns.forEach(colName => {
+                        const cellData = sec.table_data ? sec.table_data.find(d => d.Group === colName) : null;
+                        if (cellData) {
+                            const isDuration = sec.name.includes("Duration") || sec.name.includes("Time");
+                            const medianDisp = isDuration ? formatTime(cellData.Median) : cellData.Median.toFixed(2);
+                            const sdDisp = isDuration ? formatTime(cellData.SD) : cellData.SD.toFixed(2);
+
+                            html += `<td>${medianDisp}(${sdDisp})<br><small class="text-muted">n=${cellData.N}</small></td>`;
+                        } else {
+                            html += `<td>-</td>`;
+                        }
+                    });
+
+                    html += `<td class="${sigClass}">${pVal}</td></tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+
+            // B. Charts
+            if (data.sections) {
+                html += `<div class="row">`;
+                data.sections.forEach(sec => {
+                    html += `
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100 border-0 shadow-sm">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-primary fw-bold">${sec.name} Trend</h6>
+                                    <img src="data:image/png;base64,${sec.plot}" class="img-fluid rounded border shadow-sm" style="cursor: zoom-in;" onclick="window.open(this.src)">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            }
+
+            container.innerHTML = html;
+
+        } catch (error) {
+            console.error(error);
+            container.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        }
+    }
+
+    function updateAdminTestsUI(attempts) {
+        const container = document.getElementById('adminTestCheckboxes');
+        const currentChecks = container.querySelectorAll('input');
+        // Only update if length differs or empty (simple check)
+        if (currentChecks.length === attempts.length && attempts.length > 0) return;
+
+        let html = '';
+        attempts.forEach(a => {
+            html += `
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="${a}" id="adm_tst_${a}" checked>
+                    <label class="form-check-label" for="adm_tst_${a}">Test ${a}</label>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        ADMIN_AVAILABLE_TESTS = attempts;
     }
 </script>
 

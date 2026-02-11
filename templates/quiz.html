@@ -5,45 +5,6 @@
         position: relative;
         display: inline-block;
     }
-
-    .image-feedback-buttons {
-        position: absolute;
-        bottom: 10px;
-        right: 10px;
-        display: flex;
-        gap: 5px;
-        z-index: 5;
-    }
-
-    .image-feedback-buttons button {
-        background: rgba(255, 255, 255, 0.95);
-        border: 2px solid #ddd;
-        border-radius: 50%;
-        width: 42px;
-        height: 42px;
-        cursor: pointer;
-        font-size: 22px;
-        transition: all 0.2s;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        padding: 0;
-        line-height: 1;
-    }
-
-    .image-feedback-buttons button:hover {
-        transform: scale(1.15);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-    }
-
-    .image-feedback-buttons button.active-like {
-        background: #ffc107;
-        border-color: #ff9800;
-    }
-
-    .image-feedback-buttons button.active-dislike {
-        background: #f44336;
-        border-color: #d32f2f;
-        color: white;
-    }
 </style>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div class="d-flex align-items-center">
@@ -104,14 +65,6 @@
                 <div class="image-container d-inline-block">
                     <img src="{{ item.image_url }}" class="img-fluid rounded mb-2" style="max-height: 150px;"
                         onload="trackImageView('{{ item.image_url }}', {{ course_id }}, {{ item.id }})">
-                    <div class="image-feedback-buttons">
-                        <button type="button"
-                            onclick="rateImage(this, 'like', '{{ item.image_url }}', {{ course_id }}, {{ item.id }})"
-                            title="Like" data-action="like">👍🏿</button>
-                        <button type="button"
-                            onclick="rateImage(this, 'dislike', '{{ item.image_url }}', {{ course_id }}, {{ item.id }})"
-                            title="Dislike" data-action="dislike">👎🏿</button>
-                    </div>
                 </div>
                 {% endif %}
                 <textarea name="sentence_{{ item.id }}" class="form-control" rows="2"
@@ -127,15 +80,20 @@
         <p class="text-muted">請根據以下定義，評估您在本次任務中的感受 (0-100)。</p>
 
         <div class="row">
+            <!-- Modified Mental Demand -->
             <div class="col-md-6 mb-4">
                 <label class="form-label fw-bold">1. 心智需求 (Mental Demand)</label>
                 <div class="small text-muted mb-2">
                     定義：指執行任務時需要多少心理與感知活動（例如：思考、決定、計算、記憶、看、搜尋等）。<br>
                     <strong>評量重點：任務是簡單還是具有挑戰性？是單純還是複雜？是需要精確判斷還是容錯率高？</strong>
                 </div>
-                <input type="range" class="form-range" name="nasa_mental" min="0" max="100" step="5" value="50"
-                    oninput="this.nextElementSibling.innerText = this.value">
-                <div class="text-center fw-bold">50</div>
+                <div class="d-flex align-items-center">
+                    <span class="me-2 text-muted small">低</span>
+                    <input type="range" class="form-range flex-grow-1" name="nasa_mental" min="0" max="100" step="5"
+                        value="50" oninput="this.nextElementSibling.innerText = this.value">
+                    <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
+                    <span class="ms-2 text-muted small">高</span>
+                </div>
             </div>
 
             <div class="col-md-6 mb-4">
@@ -144,9 +102,13 @@
                     定義：指執行任務時需要多少肢體活動（例如：推、拉、轉動、控制、啟動等）。<br>
                     <strong>評量重點：任務是輕鬆還是辛苦？步調是緩慢還是快速？是輕鬆舒緩的還是費力勞累的？</strong>
                 </div>
-                <input type="range" class="form-range" name="nasa_physical" min="0" max="100" step="5" value="50"
-                    oninput="this.nextElementSibling.innerText = this.value">
-                <div class="text-center fw-bold">50</div>
+                <div class="d-flex align-items-center">
+                    <span class="me-2 text-muted small">低</span>
+                    <input type="range" class="form-range flex-grow-1" name="nasa_physical" min="0" max="100" step="5"
+                        value="50" oninput="this.nextElementSibling.innerText = this.value">
+                    <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
+                    <span class="ms-2 text-muted small">高</span>
+                </div>
             </div>
 
             <div class="col-md-6 mb-4">
@@ -155,9 +117,13 @@
                     定義：指因為任務發生的頻率或步調，而讓操作者感受到的時間壓力。<br>
                     <strong>評量重點：任務的步調是緩慢閒適的，還是快速且令人瘋狂（急速）的？</strong>
                 </div>
-                <input type="range" class="form-range" name="nasa_temporal" min="0" max="100" step="5" value="50"
-                    oninput="this.nextElementSibling.innerText = this.value">
-                <div class="text-center fw-bold">50</div>
+                <div class="d-flex align-items-center">
+                    <span class="me-2 text-muted small">低</span>
+                    <input type="range" class="form-range flex-grow-1" name="nasa_temporal" min="0" max="100" step="5"
+                        value="50" oninput="this.nextElementSibling.innerText = this.value">
+                    <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
+                    <span class="ms-2 text-muted small">高</span>
+                </div>
             </div>
 
             <div class="col-md-6 mb-4">
@@ -166,9 +132,13 @@
                     定義：操作者對自己達成任務目標成功程度的自我評估。<br>
                     <strong>評量重點：你認為自己達成實驗(或自己)設定目標的成功率如何？你對自己的表現滿意嗎？</strong>
                 </div>
-                <input type="range" class="form-range" name="nasa_performance" min="0" max="100" step="5" value="50"
-                    oninput="this.nextElementSibling.innerText = this.value">
-                <div class="text-center fw-bold">50</div>
+                <div class="d-flex align-items-center">
+                    <span class="me-2 text-muted small">低</span>
+                    <input type="range" class="form-range flex-grow-1" name="nasa_performance" min="0" max="100"
+                        step="5" value="50" oninput="this.nextElementSibling.innerText = this.value">
+                    <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
+                    <span class="ms-2 text-muted small">高</span>
+                </div>
             </div>
 
             <div class="col-md-6 mb-4">
@@ -177,9 +147,13 @@
                     定義：為了達到目前的表現水準，操作者必須投入多少心智與體力上的努力。<br>
                     <strong>評量重點：無論最終結果如何，你為了完成這項任務感覺自己「工作得多辛苦」？</strong>
                 </div>
-                <input type="range" class="form-range" name="nasa_effort" min="0" max="100" step="5" value="50"
-                    oninput="this.nextElementSibling.innerText = this.value">
-                <div class="text-center fw-bold">50</div>
+                <div class="d-flex align-items-center">
+                    <span class="me-2 text-muted small">低</span>
+                    <input type="range" class="form-range flex-grow-1" name="nasa_effort" min="0" max="100" step="5"
+                        value="50" oninput="this.nextElementSibling.innerText = this.value">
+                    <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
+                    <span class="ms-2 text-muted small">高</span>
+                </div>
             </div>
 
             <div class="col-md-6 mb-4">
@@ -188,9 +162,13 @@
                     定義：指在執行任務的過程中，操作者心理感受到的壓力和情緒狀態。<br>
                     <strong>評量重點：你在任務中感到的是安全、滿足、放鬆，還是覺得不安、氣餒、惱火、壓力大且煩躁？</strong>
                 </div>
-                <input type="range" class="form-range" name="nasa_frustration" min="0" max="100" step="5" value="50"
-                    oninput="this.nextElementSibling.innerText = this.value">
-                <div class="text-center fw-bold">50</div>
+                <div class="d-flex align-items-center">
+                    <span class="me-2 text-muted small">低</span>
+                    <input type="range" class="form-range flex-grow-1" name="nasa_frustration" min="0" max="100"
+                        step="5" value="50" oninput="this.nextElementSibling.innerText = this.value">
+                    <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
+                    <span class="ms-2 text-muted small">高</span>
+                </div>
             </div>
         </div>
     </div>
@@ -303,12 +281,6 @@
                                 class="img-fluid rounded" 
                                 style="max-height:400px; width: auto; object-fit: contain; margin: 0 auto; display: block;"
                                 onload="trackImageView('${block.image_url}', {{ course_id }}, null)">
-                            <div class="image-feedback-buttons">
-                                <button type="button" onclick="rateImage(this, 'like', '${block.image_url}', {{ course_id }}, null)" 
-                                    title="Like" data-action="like">👍🏿</button>
-                                <button type="button" onclick="rateImage(this, 'dislike', '${block.image_url}', {{ course_id }}, null)" 
-                                    title="Dislike" data-action="dislike">👎🏿</button>
-                            </div>
                         </div>
                     ` : ''}
                 </div>`;
@@ -348,12 +320,6 @@
                         class="img-fluid rounded" 
                         style="max-height:300px; width: auto; object-fit: contain; margin: 0 auto; display: block;"
                         onload="trackImageView('${q.image_url}', {{ course_id }}, null)">
-                    <div class="image-feedback-buttons">
-                        <button type="button" onclick="rateImage(this, 'like', '${q.image_url}', {{ course_id }}, null)" 
-                            title="Like" data-action="like">👍🏿</button>
-                        <button type="button" onclick="rateImage(this, 'dislike', '${q.image_url}', {{ course_id }}, null)" 
-                            title="Dislike" data-action="dislike">👎🏿</button>
-                    </div>
                 </div>
             ` : ''}
         `;
@@ -403,31 +369,6 @@
         return h;
     }
 
-    // Image Rating Functions
-    async function rateImage(btn, action, imageUrl, courseId, vocabId) {
-        const formData = new FormData();
-        formData.append('image_url', imageUrl);
-        formData.append('action', action);
-        formData.append('course_id', courseId);
-        formData.append('vocab_id', vocabId || '');
-        formData.append('context', 'quiz');
-
-        try {
-            await fetch('/api/image_interaction', {
-                method: 'POST',
-                body: formData
-            });
-
-            // Visual feedback
-            const container = btn.parentElement;
-            container.querySelectorAll('button').forEach(b => {
-                b.classList.remove('active-like', 'active-dislike');
-            });
-            btn.classList.add(action === 'like' ? 'active-like' : 'active-dislike');
-        } catch (e) {
-            console.error('Failed to submit feedback', e);
-        }
-    }
 
     function trackImageView(imageUrl, courseId, vocabId) {
         const formData = new FormData();

@@ -86,12 +86,13 @@ def extract_json(text):
                 except: 
                     result[key] = 0
         
-        # Extract comment
-        comm_match = re.search(r'"comment"\s*:\s*"(.*?)"', text, re.S)
+        # Extract comment (Robust)
+        # Match "comment": "..." OR 'comment': '...' OR key: "..."
+        comm_match = re.search(r'["\']?comment["\']?\s*:\s*(["\'])(.*?)\1', text, re.S | re.IGNORECASE)
         if comm_match:
-            result["comment"] = comm_match.group(1).replace('\\"', '"')
+            result["comment"] = comm_match.group(2).replace('\\"', '"')
         else:
-            result["comment"] = "評分已由系統自動校正。"
+            result["comment"] = "評分已由系統自動校正(無法讀取AI評語)。"
 
         if any(k in result for k in ["semantic_depth", "collocation", "grammar", "image_relevance"]):
             return result
@@ -165,11 +166,11 @@ def score_sentence_ai(word: str, sentence: str, story: str = "", chinese_meaning
 
     請輸出 JSON (數值範圍 0-5)：
     {{
-        "semantic_depth": 分數,
-        "collocation": 分數,
-        "grammar": 分分數,
-        "image_relevance": 分數,
-        "comment": "繁體中文評語（若有建議句或範例句，請務必使用『全英文』呈現該句子）"
+        "semantic_depth": 0-5,
+        "collocation": 0-5,
+        "grammar": 0-5,
+        "image_relevance": 0-5,
+        "comment": "繁體中文評語（若有建議句，請使用『全英文』呈現該句子）。請勿使用換行符號。"
     }}
     """
 

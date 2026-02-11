@@ -1,0 +1,893 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container-fluid mt-4" id="analyticsContainer" data-course-id="{{ course.id }}">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="bi bi-graph-up"></i> {{ course.name }} - Learning Analytics</h1>
+            <p class="text-muted">Your Group: <span class="badge bg-primary">{{ group }}</span></p>
+            <a href="/analytics" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Back to
+                Courses</a>
+        </div>
+    </div>
+
+    {% if not results %}
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> You have not completed any quizzes yet. Analytics will appear here
+        after you complete a quiz.
+        <a href="/learn/{{ course.id }}" class="btn btn-sm btn-primary ms-2">Start Learning</a>
+    </div>
+    {% else %}
+
+    <!-- Summary & Actions -->
+    <div class="row mb-4">
+        <div class="col-md-9">
+            <div class="card shadow-sm h-100">
+                <div class="card-body d-flex justify-content-around align-items-center text-center">
+                    <div>
+                        <h6 class="text-muted mb-0">Score</h6>
+                        <div id="summary-score" class="display-6 fw-bold">
+                            {% if latest_result %}
+                            {{ "%.1f"|format((latest_result.translation_score or 0) + (latest_result.sentence_score or
+                            0)) }}
+                            {% else %} - {% endif %}
+                        </div>
+                    </div>
+                    <div>
+                        <h6 class="text-muted mb-0">Total Tests</h6>
+                        <div class="display-6">{{ results|length }}</div>
+                    </div>
+                    <div>
+                        <h6 class="text-muted mb-0">Study Duration</h6>
+                        <div id="summary-study-duration" class="display-6">
+                            {% if latest_result %}
+                            {{ latest_result.learning_duration_seconds|round|int }}s
+                            {% else %} - {% endif %}
+                        </div>
+                    </div>
+                    <div>
+                        <h6 class="text-muted mb-0">Quiz Duration</h6>
+                        <div id="summary-quiz-duration" class="display-6">
+                            -
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100 bg-light">
+                <div class="card-body d-flex flex-column justify-content-center align-items-center">
+                    <a href="/quiz/{{ course.id }}" class="btn btn-primary w-100 py-3 fw-bold">
+                        <i class="bi bi-arrow-repeat"></i> Retake Quiz
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- NASA-TLX Radar Chart -->
+    {% if nasa_data %}
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="bi bi-stars"></i> NASA-TLX Cognitive Load Analysis</h5>
+        </div>
+        <div class="card-body">
+            <div style="height: 400px; max-height: 500px; position: relative;">
+                <canvas id="nasaRadarChart"></canvas>
+            </div>
+            <!-- Legend -->
+            <div class="row mt-3 text-center">
+                <div class="col-md-2">
+                    <strong>Mental</strong><br>
+                    <span id="badge-mental" class="badge bg-info">{{ nasa_data.mental }}</span>
+                </div>
+                <div class="col-md-2">
+                    <strong>Physical</strong><br>
+                    <span id="badge-physical" class="badge bg-info">{{ nasa_data.physical }}</span>
+                </div>
+                <div class="col-md-2">
+                    <strong>Temporal</strong><br>
+                    <span id="badge-temporal" class="badge bg-info">{{ nasa_data.temporal }}</span>
+                </div>
+                <div class="col-md-2">
+                    <strong>Performance</strong><br>
+                    <span id="badge-performance" class="badge bg-info">{{ nasa_data.performance }}</span>
+                </div>
+                <div class="col-md-2">
+                    <strong>Effort</strong><br>
+                    <span id="badge-effort" class="badge bg-info">{{ nasa_data.effort }}</span>
+                </div>
+                <div class="col-md-2">
+                    <strong>Frustration</strong><br>
+                    <span id="badge-frustration" class="badge bg-info">{{ nasa_data.frustration }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Quiz History -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0"><i class="bi bi-clock-history"></i> Quiz History</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Attempt</th>
+                            <th>Submitted At</th>
+                            {% for header in section_headers %}
+                            <th>{{ header }}</th>
+                            {% endfor %}
+                            <th>Total Score</th>
+                            <th>Study Duration</th>
+                            <th>Quiz Duration</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in processed_history %}
+                        <tr id="row-{{ loop.index0 }}" class="history-row" style="cursor: pointer;"
+                            onclick="switchNasaData({{ loop.index0 }})">
+                            <td>#{{ loop.index }}</td>
+                            <td>{{ item.submitted_at if item.submitted_at else '-' }}
+                            </td>
+                            {% for header in section_headers %}
+                            <td>{{ "%.1f"|format(item.section_scores.get(header, 0)) }}</td>
+                            {% endfor %}
+                            <td><strong>{{ "%.1f"|format(item.total_score) }}</strong></td>
+                            <td class="duration-cell" data-seconds="{{ item.learning_duration }}">
+                                {{ (item.learning_duration // 60)|int }}:{{ "%02d"|format(item.learning_duration %
+                                60)|int }}
+                            </td>
+                            <td class="duration-cell" data-seconds="{{ item.quiz_duration }}">
+                                {{ (item.quiz_duration // 60)|int }}:{{ "%02d"|format(item.quiz_duration % 60)|int }}
+                            </td>
+                            <td>
+                                <a href="/quiz_result/{{ course.id }}/{{ item.id }}"
+                                    class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation()">
+                                    View Details
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Rating Section -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0"><i class="bi bi-images"></i> Course Image Rating</h5>
+            <small>Please rate the following images to help us improve the material quality.</small>
+        </div>
+        <div class="card-body">
+            <div id="imageRatingContainer" class="row">
+                <!-- Dynamically loaded images -->
+                <div class="col-12 text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistical Analysis Charts -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-info text-white">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Statistical Analysis</h5>
+                <button id="loadStatsBtn" class="btn btn-light btn-sm" onclick="loadStatistics()">
+                    <i class="bi bi-download"></i> Load Charts
+                </button>
+            </div>
+            <div class="d-flex">
+                <select id="statsAttemptSelect" class="form-select form-select-sm" style="max-width: 200px;">
+                    <option value="">All Tests</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="statsLoadingMsg" class="text-center text-muted" style="display: none;">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Loading statistics...
+            </div>
+            <div id="statsChartContainer"></div>
+        </div>
+    </div>
+
+    <!-- Time Series Analysis (Friedman) -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-graph-up"></i> Learning Trend Analysis (Friedman Test)</h5>
+            <button id="loadTimeSeriesBtn" class="btn btn-light btn-sm" onclick="loadTimeSeriesStats()">
+                <i class="bi bi-arrow-clockwise"></i> Reload
+            </button>
+        </div>
+        <div class="card-body">
+            <!-- Controls -->
+            <div id="timeSeriesControls" class="mb-4 p-3 bg-light rounded border" style="display: none;">
+                <label class="fw-bold mb-2">Select Attempts to Analyze:</label>
+                <div id="attemptCheckboxes" class="d-flex gap-3 flex-wrap">
+                    <!-- Checkboxes injected here -->
+                </div>
+                <button class="btn btn-primary btn-sm mt-2" onclick="loadTimeSeriesStats(true)">
+                    Update Analysis
+                </button>
+            </div>
+
+            <div id="timeSeriesLoadingMsg" class="text-center text-muted" style="display: none;">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Analyzing time series data...
+            </div>
+
+            <!-- Result Container -->
+            <div id="timeSeriesContent">
+                <div class="text-center text-muted py-5">
+                    <p>Click "Reload" to load the analysis.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teaching Efficiency Analysis (Paas 1993) -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-success text-white">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0"><i class="bi bi-speedometer2"></i> Teaching Efficiency Analysis (Paas 1993)</h5>
+                <button id="loadEfficiencyBtn" class="btn btn-light btn-sm" onclick="loadEfficiencyAnalysis()">
+                    <i class="bi bi-download"></i> Load
+                </button>
+            </div>
+            <div class="d-flex">
+                <select id="efficiencyAttemptSelect" class="form-select form-select-sm" style="max-width: 200px;">
+                    <option value="">All Tests</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="efficiencyLoadingMsg" class="text-center text-muted" style="display: none;">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Calculating learning efficiency...
+            </div>
+            <div id="efficiencyContent" class="text-center">
+                <p class="text-muted small">
+                    This chart shows your learning efficiency by comparing your performance (Quiz Score) with your
+                    mental effort (NASA-TLX).
+                    <br>
+                    <span class="badge bg-success">Top Left</span> = High Efficiency (High Performance, Low Effort)
+                </p>
+            </div>
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+
+
+<style>
+    .image-rating-card {
+        transition: transform 0.2s;
+    }
+
+    .image-rating-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .rating-btn {
+        cursor: pointer;
+        font-size: 1.5rem;
+        transition: all 0.2s;
+    }
+
+    .rating-btn.active-like {
+        color: #28a745;
+    }
+
+    .rating-btn.active-dislike {
+        color: #dc3545;
+    }
+
+    .rating-btn:hover {
+        transform: scale(1.2);
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+    console.log("Analytics script initializing...");
+
+    // Safe Data Injection
+    // We use tojson to ensure valid JS objects, avoiding syntax errors
+    const NASA_DATA_SOURCE = {{ nasa_data| tojson if nasa_data else 'null' }};
+    const ALL_ATTEMPTS_DATA = {{ processed_history | tojson if processed_history else '[]' }};
+    const COURSE_ID = document.getElementById('analyticsContainer')?.dataset.courseId;
+
+    // Helper: Format seconds to mm:ss
+    function formatTime(seconds) {
+        if (seconds === null || seconds === undefined || isNaN(seconds)) return "-";
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+
+
+    console.log("Course ID:", COURSE_ID);
+    console.log("NASA Data (Latest):", NASA_DATA_SOURCE);
+    console.log("All Attempts:", ALL_ATTEMPTS_DATA);
+
+    // NASA-TLX Radar Chart
+    let nasaChartInstance = null;
+
+    function initNasaChart(initialData) {
+        const nasaData = {
+            labels: ['Mental Demand', 'Physical Demand', 'Temporal Demand', 'Performance', 'Effort', 'Frustration'],
+            datasets: [{
+                label: 'NASA-TLX Score',
+                data: [
+                    initialData.mental || 0,
+                    initialData.physical || 0,
+                    initialData.temporal || 0,
+                    initialData.performance || 0,
+                    initialData.effort || 0,
+                    initialData.frustration || 0
+                ],
+                fill: true,
+                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                borderColor: 'rgb(54, 162, 235)',
+                pointBackgroundColor: 'rgb(54, 162, 235)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgb(54, 162, 235)'
+            }]
+        };
+
+        const nasaConfig = {
+            type: 'radar',
+            data: nasaData,
+            options: {
+                maintainAspectRatio: false,
+                elements: {
+                    line: { borderWidth: 3 }
+                },
+                scales: {
+                    r: {
+                        min: 0,
+                        max: 100,
+                        ticks: { stepSize: 20 }
+                    }
+                }
+            }
+        };
+
+        const nasaCtx = document.getElementById('nasaRadarChart');
+        if (nasaCtx) {
+            nasaChartInstance = new Chart(nasaCtx, nasaConfig);
+        }
+    }
+
+    if (NASA_DATA_SOURCE) {
+        initNasaChart(NASA_DATA_SOURCE);
+    }
+
+    // Switch Data Function
+    window.switchNasaData = function (index) {
+        if (!ALL_ATTEMPTS_DATA || !ALL_ATTEMPTS_DATA[index]) return;
+        const data = ALL_ATTEMPTS_DATA[index].nasa_details;
+        const attemptNum = ALL_ATTEMPTS_DATA[index].attempt;
+
+        // Update Summary Cards
+        const rowData = ALL_ATTEMPTS_DATA[index];
+        const scoreElem = document.getElementById('summary-score');
+        const studyElem = document.getElementById('summary-study-duration');
+        const quizElem = document.getElementById('summary-quiz-duration');
+
+        if (scoreElem) scoreElem.textContent = (rowData.total_score || 0).toFixed(1);
+        if (studyElem) studyElem.textContent = formatTime(rowData.learning_duration);
+        if (quizElem) quizElem.textContent = formatTime(rowData.quiz_duration);
+
+        // Update Radar Chart
+        if (nasaChartInstance) {
+            nasaChartInstance.data.datasets[0].data = [
+                data.mental || 0,
+                data.physical || 0,
+                data.temporal || 0,
+                data.performance || 0,
+                data.effort || 0,
+                data.frustration || 0
+            ];
+            nasaChartInstance.data.datasets[0].label = `NASA-TLX Score (Test #${attemptNum})`;
+            nasaChartInstance.update();
+        }
+
+        // Update Legend Badges
+        document.getElementById('badge-mental').textContent = (data.mental || 0).toFixed(1);
+        document.getElementById('badge-physical').textContent = (data.physical || 0).toFixed(1);
+        document.getElementById('badge-temporal').textContent = (data.temporal || 0).toFixed(1);
+        document.getElementById('badge-performance').textContent = (data.performance || 0).toFixed(1);
+        document.getElementById('badge-effort').textContent = (data.effort || 0).toFixed(1);
+        document.getElementById('badge-frustration').textContent = (data.frustration || 0).toFixed(1);
+
+        // Update Row Highlight
+        document.querySelectorAll('.history-row').forEach(r => r.classList.remove('table-active'));
+        const selectedRow = document.getElementById(`row-${index}`);
+        if (selectedRow) selectedRow.classList.add('table-active');
+
+        // Scroll to chart
+        document.getElementById('nasaRadarChart')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
+    // Initial Formatting
+    if (ALL_ATTEMPTS_DATA.length > 0) {
+        const lastIdx = ALL_ATTEMPTS_DATA.length - 1;
+        // Auto-select latest? 
+        // switchNasaData(lastIdx); // This might be too aggressive if they just want to see the page.
+        // Let's just format the initial ones
+        const latest = ALL_ATTEMPTS_DATA[lastIdx];
+        document.getElementById('summary-score').textContent = (latest.total_score || 0).toFixed(1);
+        document.getElementById('summary-study-duration').textContent = formatTime(latest.learning_duration);
+        document.getElementById('summary-quiz-duration').textContent = formatTime(latest.quiz_duration);
+    }
+
+    // Image Rating Function
+    async function loadImages() {
+        if (!COURSE_ID) return;
+
+        try {
+            const response = await fetch(`/analytics/${COURSE_ID}/images`);
+            if (!response.ok) throw new Error("Failed to fetch images");
+
+            const data = await response.json();
+            const container = document.getElementById('imageRatingContainer');
+            if (container) {
+                container.innerHTML = '';
+
+                if (data.images && data.images.length > 0) {
+                    data.images.forEach(img => {
+                        const col = document.createElement('div');
+                        col.className = 'col-md-4 col-lg-3 mb-4';
+                        // Safe image URL handling
+                        const safeImgUrl = img.image_url || '';
+
+                        col.innerHTML = `
+                        <div class="card image-rating-card h-100 shadow-sm">
+                            <img src="${safeImgUrl}" class="card-img-top" alt="Word Image" style="height: 200px; object-fit: cover;" onerror="this.src='https://via.placeholder.com/200?text=No+Image'">
+                            <div class="card-body">
+                                <h6 class="card-title">${img.word || '?'}</h6>
+                                <p class="card-text small text-muted">${img.chinese_meaning || ''}</p>
+                                <div class="d-flex justify-content-around mt-2">
+                                    <span class="rating-btn ${img.rating === 1 ? 'active-like' : ''}" onclick="rateImage('${safeImgUrl}', ${img.vocab_id}, 1, this)">
+                                        <i class="bi bi-hand-thumbs-up-fill"></i>
+                                    </span>
+                                    <span class="rating-btn ${img.rating === -1 ? 'active-dislike' : ''}" onclick="rateImage('${safeImgUrl}', ${img.vocab_id}, -1, this)">
+                                        <i class="bi bi-hand-thumbs-down-fill"></i>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                        container.appendChild(col);
+                    });
+                } else {
+                    container.innerHTML = '<div class="col-12 text-center"><p class="text-muted">No images available for this course.</p></div>';
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load images:', error);
+            const container = document.getElementById('imageRatingContainer');
+            if (container) container.innerHTML = '<div class="col-12 text-center text-danger">Failed to load images. Please refresh.</div>';
+        }
+    }
+
+    async function rateImage(imageUrl, vocabId, rating, element) {
+        if (!COURSE_ID) return;
+
+        try {
+            const card = element.closest('.card-body');
+            const buttons = card.querySelectorAll('.rating-btn');
+
+            buttons.forEach(btn => btn.classList.remove('active-like', 'active-dislike'));
+
+            if (rating === 1) element.classList.add('active-like');
+            else if (rating === -1) element.classList.add('active-dislike');
+
+            await fetch(`/analytics/${COURSE_ID}/rate_image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_url: imageUrl,
+                    vocab_id: vocabId,
+                    rating: rating,
+                    question_context: 'vocab'
+                })
+            });
+
+            // Animation
+            element.style.transform = 'scale(1.3)';
+            setTimeout(() => { element.style.transform = 'scale(1)'; }, 200);
+
+        } catch (error) {
+            console.error('Rating failed:', error);
+            alert('Rating failed.');
+        }
+    }
+
+    // Load Statistics
+    async function loadStatistics() {
+        if (!COURSE_ID) {
+            console.error("No Course ID, cannot load stats");
+            return;
+        }
+
+        const loadingMsg = document.getElementById('statsLoadingMsg');
+        const container = document.getElementById('statsChartContainer');
+        const btn = document.getElementById('loadStatsBtn');
+
+        try {
+            if (loadingMsg) loadingMsg.style.display = 'block';
+            if (btn) btn.disabled = true;
+            if (container) container.innerHTML = '';
+
+            console.log("Fetching statistics...");
+            const attempt = document.getElementById('statsAttemptSelect')?.value;
+            let url = `/analytics/${COURSE_ID}/stats`;
+            if (attempt) url += `?target_attempt=${attempt}`;
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server Error: ${response.status} - ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log("Stats received", data);
+
+            if (loadingMsg) loadingMsg.style.display = 'none';
+
+            if (data.msg) {
+                if (container) container.innerHTML = `<p class="text-muted">${data.msg}</p>`;
+                if (btn) btn.disabled = false;
+                return;
+            }
+
+            // Render Charts
+            let html = '';
+            const plots = data.plots || {};
+            const interpretations = data.interpretations || {};
+
+            if (Object.keys(plots).length === 0) {
+                html = '<p class="text-muted">No sufficient data for statistical analysis yet.</p>';
+            } else {
+                for (const [metric, plotBase64] of Object.entries(plots)) {
+                    const interpretation = interpretations[metric] || '';
+                    html += `
+                        <div class="mb-5 text-center">
+                            <h6 class="text-secondary fw-bold text-uppercase">${metric}</h6>
+                            <img src="data:image/png;base64,${plotBase64}" class="img-fluid border rounded mb-2 shadow-sm" alt="${metric}">
+                            <div class="card bg-light mt-2 p-2">
+                                <p class="mb-0 text-start small"><strong>Analysis:</strong> ${interpretation}</p>
+                            </div>
+                            <hr class="mt-4">
+                        </div>
+                    `;
+                }
+
+                html += `
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> <strong>Chart Guide:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>Your data point is marked with a <span class="text-danger fw-bold">Red Diamond</span>.</li>
+                            <li>Other learners are shown as grey dots.</li>
+                            <li>Boxplots show the distribution of data across groups.</li>
+                        </ul>
+                    </div>
+                `;
+            }
+
+            if (container) container.innerHTML = html;
+            if (btn) {
+                btn.textContent = 'Reload Charts';
+                btn.disabled = false;
+            }
+
+        } catch (error) {
+            console.error('Failed to load stats:', error);
+            if (loadingMsg) loadingMsg.style.display = 'none';
+            if (container) container.innerHTML = `<div class="alert alert-danger">Failed to load statistics: ${error.message}</div>`;
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // Load Time Series Stats
+    async function loadTimeSeriesStats(useFilter = true) { // Default to filtering
+        if (!COURSE_ID) return;
+
+        const container = document.getElementById('timeSeriesContent');
+        const btn = document.getElementById('loadTimeSeriesBtn');
+        const loadingMsg = document.getElementById('timeSeriesLoadingMsg');
+        const controls = document.getElementById('timeSeriesControls');
+        const checkboxContainer = document.getElementById('attemptCheckboxes');
+
+        try {
+            // Validation: Must select at least 2 attempts
+            const selected = Array.from(checkboxContainer.querySelectorAll('input:checked')).map(cb => cb.value);
+            if (selected.length < 2) {
+                container.innerHTML = `<div class="alert alert-warning">Please select at least 2 tests to analyze the trend.</div>`;
+                return;
+            }
+
+            if (loadingMsg) loadingMsg.style.display = 'block';
+            if (btn) btn.disabled = true;
+            if (container) container.innerHTML = '';
+
+            // Build Query
+            let url = `/analytics/${COURSE_ID}/time_series_stats`;
+            if (useFilter) {
+                const selected = Array.from(checkboxContainer.querySelectorAll('input:checked')).map(cb => cb.value);
+                if (selected.length > 0) {
+                    url += `?attempts=${selected.join(',')}`;
+                }
+            }
+
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(await response.text());
+
+            const data = await response.json();
+
+            if (loadingMsg) loadingMsg.style.display = 'none';
+            if (btn) btn.disabled = false;
+
+            if (data.msg || data.error) {
+                container.innerHTML = `<div class="alert alert-warning">${data.msg || data.error}</div>`;
+                if (data.available_attempts) updateAttemptsUI(data.available_attempts);
+                return;
+            }
+
+            // 1. Update Controls
+            if (data.available_attempts) {
+                // Capture current selection if checkboxes exist, otherwise null (default all checked)
+                const inputs = checkboxContainer.querySelectorAll('input');
+                let currentSelected = null;
+                if (inputs.length > 0) {
+                    currentSelected = Array.from(checkboxContainer.querySelectorAll('input:checked')).map(cb => cb.value);
+                }
+
+                updateAttemptsUI(data.available_attempts, currentSelected);
+                controls.style.display = 'block';
+            }
+
+            // 2. Render Content
+            let html = '';
+
+            // A. Summary Table
+            if (data.sections && data.sections.length > 0) {
+                const firstSec = data.sections[0];
+                const columns = firstSec.table_data.map(d => d.Group);
+
+                html += `
+                <div class="table-responsive mb-4">
+                    <h6 class="fw-bold border-bottom pb-2">Descriptive Statistics & Inference</h6>
+                    <table class="table table-bordered table-hover text-center align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Variable</th>
+                                ${columns.map(c => `<th>${c}<br><small>(Median(SD))</small></th>`).join('')}
+                                <th>p-value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.sections.forEach(sec => {
+                    const pVal = sec.stats.p_value.toFixed(3);
+                    const sigClass = sec.stats.p_value < 0.05 ? "text-danger fw-bold" : "";
+
+                    html += `<tr><td class="fw-bold text-start">${sec.name}</td>`;
+
+                    columns.forEach(colName => {
+                        const cellData = sec.table_data.find(d => d.Group === colName);
+                        if (cellData) {
+                            html += `<td>${cellData.Median.toFixed(2)}(${cellData.SD.toFixed(2)})<br><small class="text-muted">n=${cellData.N}</small></td>`;
+                        } else {
+                            html += `<td>-</td>`;
+                        }
+                    });
+
+                    html += `<td class="${sigClass}">${pVal}</td></tr>`;
+                });
+
+                html += `</tbody></table></div>`;
+            }
+
+            // B. Charts
+            if (data.sections) {
+                html += `<div class="row">`;
+                data.sections.forEach(sec => {
+                    html += `
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100 border-0 shadow-sm">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title text-primary fw-bold">${sec.name} Trend</h6>
+                                    <img src="data:image/png;base64,${sec.plot}" class="img-fluid rounded border shadow-sm">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            }
+
+            container.innerHTML = html;
+
+        } catch (error) {
+            console.error(error);
+            if (loadingMsg) loadingMsg.style.display = 'none';
+            if (btn) btn.disabled = false;
+            container.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        }
+    }
+
+    function updateAttemptsUI(attempts, selected = null) {
+        const container = document.getElementById('attemptCheckboxes'); // Corrected ID from testCheckboxes
+        if (!container) return;
+
+        let html = '';
+        attempts.forEach(a => {
+            const isChecked = (selected === null) || selected.includes(String(a)) ? 'checked' : '';
+            html += `
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" value="${a}" id="ts_cb_${a}" ${isChecked}>
+                    <label class="form-check-label" for="ts_cb_${a}">Test ${a}</label>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        AVAILABLE_TESTS = attempts;
+    }
+
+    // Load available tests
+    async function loadTests() {
+        if (!COURSE_ID) return;
+        const selects = [
+            document.getElementById('efficiencyAttemptSelect'),
+            document.getElementById('statsAttemptSelect')
+        ];
+        const timeSeriesControls = document.getElementById('timeSeriesControls');
+
+        try {
+            const response = await fetch(`/admin_api/course_attempts?course_id=${COURSE_ID}`);
+            const data = await response.json();
+
+            if (data.attempts && data.attempts.length > 0) {
+                // Populate Dropdowns
+                data.attempts.forEach(a => {
+                    selects.forEach(select => {
+                        if (select) {
+                            const option = document.createElement('option');
+                            option.value = a;
+                            option.textContent = `Test ${a}`;
+                            select.appendChild(option);
+                        }
+                    });
+                });
+
+                // Populate Time Series Checkboxes
+                if (data.attempts.length > 0) {
+                    updateAttemptsUI(data.attempts); // Use the existing function
+                    if (timeSeriesControls) timeSeriesControls.style.display = 'block';
+                }
+            }
+        } catch (e) {
+            console.error("Failed to load tests", e);
+        }
+    }
+
+    // Teaching Efficiency Analysis (Paas 1993)
+    async function loadEfficiencyAnalysis() {
+        if (!COURSE_ID) return;
+
+        const btn = document.getElementById('loadEfficiencyBtn');
+        const container = document.getElementById('efficiencyContent');
+        const loadingMsg = document.getElementById('efficiencyLoadingMsg');
+        const attempt = document.getElementById('efficiencyAttemptSelect').value;
+
+        if (btn) btn.disabled = true;
+        if (loadingMsg) loadingMsg.style.display = 'block';
+        if (container) container.innerHTML = '';
+
+        try {
+            let url = `/analytics/${COURSE_ID}/efficiency_plot`;
+            if (attempt) url += `?target_attempt=${attempt}`;
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (data.error) throw new Error(data.error);
+
+            if (!data.sections || Object.keys(data.sections).length === 0) {
+                container.innerHTML = `<div class="alert alert-info">No efficiency data available for this selection.</div>`;
+                return;
+            }
+
+            let html = '<div class="row">';
+
+            // Sort sections: Overall first, then alphabetical
+            const sections = Object.keys(data.sections).sort((a, b) => {
+                if (a === 'Overall') return -1;
+                if (b === 'Overall') return 1;
+                return a.localeCompare(b);
+            });
+
+            sections.forEach(secName => {
+                const sec = data.sections[secName];
+                html += `
+                    <div class="col-12 mb-5">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0 fw-bold"><i class="bi bi-graph-up"></i> Section: ${secName}</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row align-items-center">
+                                    <div class="col-md-8 text-center">
+                                        <img src="${sec.image}" class="img-fluid border rounded shadow-sm" alt="Efficiency Plot - ${secName}">
+                                    </div>
+                                    <div class="col-md-4 text-start mt-4 mt-md-0">
+                                        <h5 class="text-primary fw-bold mb-3">Analysis Result</h5>
+                                        <div class="alert alert-info border-0 shadow-sm">
+                                            <strong><i class="bi bi-info-circle-fill"></i> Status:</strong><br>
+                                            ${sec.quadrant}
+                                        </div>
+                                        <p>${sec.message}</p>
+                                        <hr>
+                                        <div class="p-3 bg-light rounded shadow-sm">
+                                            <h6 class="fw-bold mb-2">Your Stats:</h6>
+                                            <div class="d-flex justify-content-between mb-1">
+                                                <span>Performance (Z):</span>
+                                                <span class="fw-bold">${sec.user_data.Z_P}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between mb-1">
+                                                <span>Effort (Z):</span>
+                                                <span class="fw-bold">${sec.user_data.Z_R}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between">
+                                                <span>Efficiency Score:</span>
+                                                <span class="fw-bold ${sec.user_data.E > 0 ? 'text-success' : 'text-danger'}">${sec.user_data.E}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+
+        } catch (error) {
+            console.error(error);
+            container.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        } finally {
+            if (btn) btn.disabled = false;
+            if (loadingMsg) loadingMsg.style.display = 'none';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadImages();
+        loadTests();
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="bi bi-graph-up-arrow"></i> Learning Analytics Report</h1>
+            <p class="text-muted">Select a course to view detailed learning analytics data</p>
+        </div>
+    </div>
+
+    {% if courses %}
+    <div class="row">
+        {% for course in courses %}
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100 shadow-sm hover-shadow">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        {{ course.name }}
+                        {% if course.is_deleted %}
+                        <span class="badge bg-secondary ms-2" style="font-size: 0.7em;">Deleted</span>
+                        {% endif %}
+                    </h5>
+                    <p class="card-text text-muted small">{{ course.description }}</p>
+
+                    <div class="d-grid gap-2 mt-3">
+                        <a href="/analytics/{{ course.id }}" class="btn btn-primary">
+                            <i class="bi bi-bar-chart-line"></i> View Analytics Report
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> You have not joined any courses yet. Please <a href="/courses">join a
+            course</a> first to see the analytics report.
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .hover-shadow {
+        transition: box-shadow 0.3s ease;
+    }
+
+    .hover-shadow:hover {
+        box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .15) !important;
+    }
+</style>
+{% endblock %}

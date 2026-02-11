@@ -9,6 +9,7 @@ import io
 import base64
 import shutil
 import os
+from sqlalchemy.exc import IntegrityError
 
 router = APIRouter(prefix="/admin_api")
 
@@ -37,21 +38,61 @@ async def upload_media(
 
 
 @router.post("/create_course")
-async def create_course(name: str = Form(...), description: str = Form(""), groups: str = Form("A,B"), quiz_time_limit: int = Form(5), db: Session = Depends(get_db)):
+async def create_course(
+    name: str = Form(...), 
+    description: str = Form(""), 
+    groups: str = Form("A,B"), 
+    quiz_time_limit: int = Form(5), 
+    is_public: bool = Form(False),
+    hashtags: str = Form(""),
+    redirect_to: str = Form(None),
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
     # Validate groups format
     group_list = [g.strip() for g in groups.split(",") if g.strip()]
     cleaned_groups = ",".join(group_list)
     
-    new_course = Course(name=name, description=description, group_names=cleaned_groups, quiz_time_limit=quiz_time_limit)
+    new_course = Course(
+        name=name, 
+        description=description, 
+        group_names=cleaned_groups, 
+        quiz_time_limit=quiz_time_limit,
+        is_public=is_public,
+        hashtags=hashtags,
+        creator_id=user.id if user else None
+    )
     db.add(new_course)
-    db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Course name already exists. Please choose a different name.")
+    
+    if redirect_to:
+        return RedirectResponse(url=redirect_to, status_code=303)
+        
+    return RedirectResponse(url="/admin" if (user and user.is_admin) else "/courses", status_code=303)
 
 @router.post("/update_course/{course_id}")
-async def update_course(course_id: int, name: str = Form(...), description: str = Form(""), groups: str = Form(""), quiz_time_limit: int = Form(5), redirect_to: str = Form(None), db: Session = Depends(get_db)):
+async def update_course(
+    course_id: int, 
+    name: str = Form(...), 
+    description: str = Form(""), 
+    groups: str = Form(""), 
+    quiz_time_limit: int = Form(5), 
+    is_public: bool = Form(False),
+    hashtags: str = Form(""),
+    redirect_to: str = Form(None), 
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
     course = db.query(Course).filter(Course.id == course_id).first()
     if course:
-        # Validate groups logic similar to create
+        # Permission check: Admin or Creator
+        if user and not user.is_admin and course.creator_id != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
         group_list = [g.strip() for g in groups.split(",") if g.strip()]
         cleaned_groups = ",".join(group_list)
         
@@ -59,13 +100,101 @@ async def update_course(course_id: int, name: str = Form(...), description: str 
         course.description = description
         course.group_names = cleaned_groups
         course.quiz_time_limit = quiz_time_limit
-        db.commit()
+        course.is_public = is_public
+        course.hashtags = hashtags
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=400, detail="Course name already exists. Please choose a different name.")
     
     if redirect_to == "content_manager":
         return RedirectResponse(url=f"/admin/course/{course_id}/content_manager", status_code=303)
-    if redirect_to:
+    elif redirect_to:
         return RedirectResponse(url=redirect_to, status_code=303)
-    return RedirectResponse(url=f"/admin/course/{course_id}", status_code=303)
+    
+    target_url = "/admin" if (user and user.is_admin) else "/courses"
+    return RedirectResponse(url=target_url, status_code=303)
+
+@router.post("/delete_course/{course_id}")
+async def delete_course(
+    course_id: int, 
+    user: User = Depends(get_current_user_req), 
+    db: Session = Depends(get_db)
+):
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+        
+    if not user.is_admin and course.creator_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    course.is_deleted = True
+    db.commit()
+    return {"status": "success"}
+
+@router.post("/restore_course/{course_id}")
+async def restore_course(
+    course_id: int, 
+    user: User = Depends(get_current_user_req), 
+    db: Session = Depends(get_db)
+):
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+        
+    if not user.is_admin and course.creator_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    course.is_deleted = False
+    db.commit()
+    return {"status": "success"}
+
+@router.post("/permanently_delete_course/{course_id}")
+async def permanently_delete_course(
+    course_id: int, 
+    user: User = Depends(get_current_user_req), 
+    db: Session = Depends(get_db)
+):
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+        
+    if not user.is_admin and course.creator_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Cascade delete related data (simple approach for now, relying on DB cascades if set, or manual cleanup)
+    # Generic cleanup:
+    db.query(Enrollment).filter(Enrollment.course_id == course_id).delete()
+    db.query(Vocabulary).filter(Vocabulary.course_id == course_id).delete()
+    db.query(QuizResult).filter(QuizResult.course_id == course_id).delete()
+    # Delete image interactions/ratings if needed
+    db.query(ImageInteraction).filter(ImageInteraction.course_id == course_id).delete()
+    db.query(ImageRating).filter(ImageRating.course_id == course_id).delete()
+    
+    db.delete(course)
+    db.commit()
+    return {"status": "success"}
+
+@router.get("/web_deleted_courses")
+async def get_web_deleted_courses(
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    if not user:
+        return []
+        
+    query = db.query(Course).filter(Course.is_deleted == True)
+    if not user.is_admin:
+        query = query.filter(Course.creator_id == user.id)
+        
+    courses = query.all()
+    return [{
+        "id": c.id, 
+        "name": c.name, 
+        "description": c.description,
+        "is_public": c.is_public
+    } for c in courses]
 
 @router.post("/update_course_stages/{course_id}")
 async def update_course_stages(
@@ -501,6 +630,14 @@ async def move_vocab(
     # For now, redirect to content_manager
     return RedirectResponse(url=f"/admin/course/{target.course_id}/content_manager", status_code=303)
 
+@router.post("/delete_vocab/{vocab_id}")
+async def delete_vocab(vocab_id: int, db: Session = Depends(get_db)):
+    v = db.query(Vocabulary).filter(Vocabulary.id == vocab_id).first()
+    if v:
+        v.is_deleted = True
+        db.commit()
+    return JSONResponse({"status": "success"})
+
 @router.post("/delete_user_result/{result_id}")
 async def delete_user_result(
     result_id: int, 
@@ -648,14 +785,20 @@ async def export_csv(course_id: int = None, db: Session = Depends(get_db)):
 
 # Set Matplotlib backend inside functions instead of globally
 
-def perform_stats_and_plot(df, val_col, group_col, title):
+def perform_stats_and_plot(df, val_col, group_col, title, highlight_user_id=None):
     """
     Helper to perform stats (Wilcoxon or Kruskal) and plot.
     Returns: dict with stats_result and plot_base64
+    
+    Args:
+        highlight_user_id: Optional user_id to highlight on the plot
     """
+    print(f"DEBUG: perform_stats_and_plot called for {title}")
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial', 'sans-serif']
+    plt.rcParams['axes.unicode_minus'] = False
     import seaborn as sns
     import io
     import base64
@@ -680,7 +823,7 @@ def perform_stats_and_plot(df, val_col, group_col, title):
         from scipy.stats import ranksums
         stat, p_val = ranksums(*valid_groups)
         test_name = "Wilcoxon Rank-Sum"
-        stat_res = {"test": test_name, "stat": stat, "p_value": p_val}
+        stat_res = {"test": test_name, "stat": float(stat), "p_value": float(p_val)}
     else:
         # Kruskal-Wallis
         from scipy.stats import kruskal
@@ -690,17 +833,34 @@ def perform_stats_and_plot(df, val_col, group_col, title):
         if p_val < 0.05:
             try:
                 # Dunn's Test
+                import scikit_posthocs as sp
                 dunn = sp.posthoc_dunn(df, val_col=val_col, group_col=group_col, p_adjust='bonferroni')
                 dunn_res = dunn.to_dict()
             except: pass
-        stat_res = {"test": test_name, "stat": stat, "p_value": p_val, "dunn": dunn_res}
+        stat_res = {"test": test_name, "stat": float(stat), "p_value": float(p_val), "dunn": dunn_res}
 
     # Plotting
-    fig, ax = plt.subplots(figsize=(8, 6))
+    # Plotting
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(8, 6))
+    ax = fig.subplots()
     
     # Boxplot + Stripplot
     sns.boxplot(x=group_col, y=val_col, data=df, ax=ax, palette="Set2", order=unique_groups)
-    sns.stripplot(x=group_col, y=val_col, data=df, ax=ax, color='black', alpha=0.5, jitter=True, order=unique_groups)
+    
+    # Stripplot with highlighting
+    if highlight_user_id is not None and 'user_id' in df.columns:
+        # Plot non-highlighted points
+        df_others = df[df['user_id'] != highlight_user_id]
+        df_highlight = df[df['user_id'] == highlight_user_id]
+        
+        sns.stripplot(x=group_col, y=val_col, data=df_others, ax=ax, color='gray', alpha=0.5, jitter=True, order=unique_groups, size=5, edgecolor='white', linewidth=0.5)
+        
+        # Plot highlighted points
+        if not df_highlight.empty:
+            sns.stripplot(x=group_col, y=val_col, data=df_highlight, ax=ax, color='red', alpha=1.0, jitter=False, order=unique_groups, size=10, marker='D', edgecolor='darkred', linewidth=2)
+    else:
+        sns.stripplot(x=group_col, y=val_col, data=df, ax=ax, color='black', alpha=0.5, jitter=True, order=unique_groups)
     
     # Title Color
     color = '#D62728' if p_val < 0.05 else 'black'
@@ -712,32 +872,234 @@ def perform_stats_and_plot(df, val_col, group_col, title):
         if g in stats_df.index:
             row = stats_df.loc[g]
             label = (f"{g}\n(n={int(row['count'])})\n"
-                     f"Mean={row['mean']:.2f}\n"
-                     f"Med={row['median']:.2f}\n"
-                     f"SD={row['std']:.2f}")
+            f"Mean={row['mean']:.2f}\n"
+            f"Med={row['median']:.2f}\n"
+            f"SD={row['std']:.2f}")
         else:
             label = g
         new_labels.append(label)
     
     ax.set_xticklabels(new_labels)
-    plt.tight_layout()
+    fig.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    plt.close()
+    fig.savefig(buf, format='png')
+    # No need to close explicit figure object, but good practice to del if heavy memory usage, 
+    # though GC handles it. plt.close() is strictly for pyplot state machine.
     plot_url = base64.b64encode(buf.getvalue()).decode('utf-8')
     
     return {"stats": stat_res, "plot": plot_url}
 
+def perform_friedman_plot(df, val_col, time_col, subject_col, title):
+    """
+    Performs Friedman Test and plots Time Series with Error Bars.
+    Structure follows method.md Part 2.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial', 'sans-serif']
+    plt.rcParams['axes.unicode_minus'] = False
+    import seaborn as sns
+    import pandas as pd
+    import io
+    import base64
+    from scipy import stats
+    import numpy as np
+    
+    # 1. Pivot Data: Users x Time
+    # Ensure time_col is ordered categorical if possible, or just sort
+    try:
+        pivot_df = df.pivot(index=subject_col, columns=time_col, values=val_col)
+    except Exception as e:
+        return {"error": f"Pivot failed: {str(e)}"}
+    
+    # Drop rows with missing values (Friedman requires complete blocks)
+    pivot_df = pivot_df.dropna()
+    
+    # NEW LOGIC: Allow 2 or more points
+    if pivot_df.empty or len(pivot_df.columns) < 2:
+        return {"error": "Insufficient complete data (need at least 2 time points per user)"}
+        
+    time_points = pivot_df.columns.tolist() # e.g. [1, 2] or ['T1', 'T2']
+    # Use natural sort to handle "Test 10" correctly after "Test 2"
+    import re
+    def natural_sort_key(s):
+        return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', str(s))]
+    time_points.sort(key=natural_sort_key)
+    
+    # 2. Descriptive Stats & Error Bars
+    medians = pivot_df.median()
+    q1 = pivot_df.quantile(0.25)
+    q3 = pivot_df.quantile(0.75)
+    
+    # Debug: Check types
+    # print(f"DEBUG: Medians type: {type(medians)}")
+    if isinstance(medians, (int, float)): # Single scalar check
+         medians = [medians]
+         q1 = [q1]
+         q3 = [q3]
+    
+    yerr_low = medians - q1
+    yerr_high = q3 - medians
+    # Ensure positive
+    yerr_low = yerr_low.abs() 
+    yerr_high = yerr_high.abs()
+    
+    asymmetric_error = [yerr_low.values, yerr_high.values]
+    
+    # 3. Statistical Test (Friedman or Wilcoxon)
+    data_arrays = [pivot_df[col].values for col in time_points]
+    
+    stat_val = 0
+    p_val = 1.0
+    test_result_name = ""
+    
+    if len(time_points) == 2:
+        # Wilcoxon Signed-Rank Test
+        try:
+            stat_val, p_val = stats.wilcoxon(data_arrays[0], data_arrays[1])
+            test_result_name = "Wilcoxon Signed-Rank"
+        except ValueError:
+            p_val = 1.0
+    else:
+        # Friedman Test (3+)
+        try:
+            stat_val, p_val = stats.friedmanchisquare(*data_arrays)
+            test_result_name = "Friedman"
+        except ValueError:
+            p_val = 1.0
+        
+    # 4. Plotting
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(8, 6))
+    ax = fig.subplots()
+    
+    x_points = range(len(time_points))
+    
+    # Labels with N, Med, SD
+    xtick_labels = []
+    table_data = [] # NEW: Capture stats for table
+    
+    for tp in time_points:
+        col_data = pivot_df[tp]
+        n_val = len(col_data)
+        med_val = col_data.median()
+        std_val = col_data.std()
+        
+        # NaN Safety for JSON serialization
+        if pd.isna(med_val): med_val = 0.0
+        if pd.isna(std_val): std_val = 0.0
+        
+        # Format for Plot
+        label = f"{tp}\n(n={n_val})\nMed={med_val:.2f}\nSD={std_val:.2f}"
+        xtick_labels.append(label)
+        
+        # Format for Table
+        table_data.append({
+            "Group": tp,
+            "N": int(n_val),
+            "Median": float(round(med_val, 2)),
+            "SD": float(round(std_val, 2))
+        })
+        
+    # Main Line Plot
+    ax.errorbar(x_points, medians, yerr=asymmetric_error, fmt='-o', capsize=5, lw=2, markersize=8, color='#1f77b4', label=title)
+    ax.set_xticks(x_points)
+    ax.set_xticklabels(xtick_labels)
+    ax.set_ylabel("Median Score")
+    
+    p_val_float = float(p_val)
+    sig_text = "(*)" if p_val_float < 0.05 else "(ns)"
+    color = '#D62728' if p_val_float < 0.05 else 'black'
+    ax.set_title(f"{title}\n{test_result_name}: p={p_val_float:.4f} {sig_text}", fontweight='bold', color=color)
+    
+    # Y-Limits auto adjustment
+    all_vals = list(q1) + list(q3)
+    if all_vals:
+        y_min, y_max = min(all_vals), max(all_vals)
+        y_range = y_max - y_min if y_max != y_min else 1.0
+        ax.set_ylim(y_min - y_range * 0.4, y_max + y_range * 0.6)
+    
+    # 5. Post-hoc / Pairwise Logic
+    if p_val < 0.05 and len(time_points) >= 2:
+        pairs = []
+        import itertools
+        for i in range(len(time_points)):
+            for j in range(i + 1, len(time_points)):
+                pairs.append((i, j))
+        
+        n_comp = len(pairs)
+        
+        # Helper to draw bracket
+        def draw_bracket(ax, x1, x2, y, p_v, align='top'):
+            h = (y_max - y_min if y_max!=y_min else 1) * 0.05
+            text = f"p={p_v:.3f}" if p_v >= 0.001 else "p<.001"
+            if p_v < 0.05: text += "*"
+            c = 'red' if p_v < 0.05 else 'black'
+            
+            if align == 'top':
+                ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.5, c='black')
+                ax.text((x1+x2)*0.5, y+h*1.5, text, ha='center', va='bottom', color=c, fontsize=9, fontweight='bold')
+            else:
+                ax.plot([x1, x1, x2, x2], [y, y-h, y-h, y], lw=1.5, c='black')
+                ax.text((x1+x2)*0.5, y-h*2.5, text, ha='center', va='top', color=c, fontsize=9, fontweight='bold')
+
+        # Logic to stack brackets
+        # Dynamic approach:
+        top_y = y_max + (y_max - y_min) * 0.15
+        bottom_y = y_min - (y_max - y_min) * 0.15
+        
+        for (i, j) in pairs:
+            # If strictly 2 points, we reuse the main p-value? 
+            # Or re-calculate? Same result.
+            
+            try:
+                stat_w, p_w = stats.wilcoxon(pivot_df.iloc[:, i], pivot_df.iloc[:, j])
+                
+                # Apply Bonferroni if > 1 comparison (i.e. > 2 groups)
+                p_adj = min(p_w * n_comp, 1.0) if len(time_points) > 2 else p_w
+                
+                # Only draw if significant? OR draw all? Usually specific ones.
+                # Let's draw significant ones or adjacent ones.
+                
+                # Heuristic: Adjacent = Top, Distant = Bottom
+                if abs(i - j) == 1:
+                    draw_bracket(ax, i, j, top_y, p_adj, 'top')
+                    top_y += (y_max - y_min) * 0.1 # Move up for next
+                else:
+                    if len(time_points) > 2: # Only draw distant brackets for 3+ points
+                         draw_bracket(ax, i, j, bottom_y, p_adj, 'bottom')
+            except: pass
+            
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    plot_url = base64.b64encode(buf.getvalue()).decode('utf-8')
+    
+    # Final check for p_val
+    if pd.isna(p_val): p_val = 1.0
+
+    return {
+        "stats": {"test": test_result_name, "p_value": float(p_val)}, 
+        "plot": plot_url,
+        "table_data": table_data # NEW Return field
+    }
+
+
 @router.get("/stats")
-async def get_stats(course_id: int = 1, db: Session = Depends(get_db)):
+async def get_stats(course_id: int = 1, target_attempt: int = None, db: Session = Depends(get_db)):
     import pandas as pd
     import json
     # Fetch data joined with Enrollment to get group correctly
     enrollments = db.query(Enrollment).filter(Enrollment.course_id == course_id).all()
     user_groups = {e.user_id: e.group for e in enrollments}
     
-    results = db.query(QuizResult).filter(QuizResult.course_id == course_id, QuizResult.is_deleted == False).all()
+    query = db.query(QuizResult).filter(QuizResult.course_id == course_id, QuizResult.is_deleted == False)
+    if target_attempt:
+        query = query.filter(QuizResult.attempt == target_attempt)
+        
+    results = query.all()
     if not results:
         return {"msg": "No data for this course"}
 
@@ -815,8 +1177,11 @@ async def get_stats(course_id: int = 1, db: Session = Depends(get_db)):
     df = pd.DataFrame(data)
 
     # Metrics to analyze: derived from dynamic sets + duplicates logic
-    # Filter out redundant single NASA if details exist
     metrics = sorted(list(dynamic_metrics))
+    # Prioritize specific metrics to the top
+    priority = ["Quiz Duration", "Total Duration", "Learning Duration"]
+    metrics = [m for m in priority if m in metrics] + [m for m in metrics if m not in priority]
+    
     if not metrics: metrics = ["Total Duration", "nasa_tlx"] # Fallback
     
     stats_results = {}
@@ -831,7 +1196,10 @@ async def get_stats(course_id: int = 1, db: Session = Depends(get_db)):
         # Only keep groups that exist for this course (filter out stray data if any)
         
         try:
-            res = perform_stats_and_plot(valid_df, m, 'group', f"Analysis: {m}")
+            # Determine title prefix: "Score Comparison" or "Time Comparison"
+            title_prefix = "Time Comparison" if "Duration" in m or "Time" in m else "Score Comparison"
+            
+            res = perform_stats_and_plot(valid_df, m, 'group', f"{title_prefix}: {m}")
             
             if "error" in res:
                 interpretations[m] = f"Unable to perform analysis: {res['error']} (Reason: Only one group or insufficient samples)"
@@ -1561,10 +1929,28 @@ async def get_image_analytics(course_id: int = None, db: Session = Depends(get_d
 
 # ==================== TEACHING EFFICIENCY ANALYSIS (Paas 1993) ====================
 
+@router.get("/course_attempts")
+async def get_course_attempts(course_id: int, db: Session = Depends(get_db)):
+    """
+    Get list of available attempts (1, 2, 3...) for a course
+    """
+    try:
+        results = db.query(QuizResult.attempt).filter(
+            QuizResult.course_id == course_id, 
+            QuizResult.is_deleted == False
+        ).distinct().order_by(QuizResult.attempt).all()
+        
+        attempts = [r[0] for r in results]
+        return {"attempts": attempts}
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
 @router.get("/efficiency_analysis")
-async def get_efficiency_analysis(course_id: int, db: Session = Depends(get_db)):
+async def get_efficiency_analysis(course_id: int, target_attempt: int = None, db: Session = Depends(get_db)):
     """
     Teaching Efficiency Analysis (Multi-Section Support)
+    Optional: target_attempt to filter specific test run
     """
     try:
         import numpy as np
@@ -1574,145 +1960,182 @@ async def get_efficiency_analysis(course_id: int, db: Session = Depends(get_db))
         import scikit_posthocs as sp
         import json
         
-        results = db.query(QuizResult).filter(QuizResult.course_id == course_id, QuizResult.is_deleted == False).all()
+        query = db.query(QuizResult).filter(QuizResult.course_id == course_id, QuizResult.is_deleted == False)
+        
+        # Filter by attempt if provided
+        if target_attempt is not None:
+            query = query.filter(QuizResult.attempt == target_attempt)
+            
+        results = query.all()
         if not results: return {"error": "No data"}
         
-        # 1. Collect available sections and pre-fetch users
-        all_sections = set(['Overall'])
-        user_ids = set()
-        for r in results:
-            user_ids.add(r.user_id)
-            try:
-                sec_stats = json.loads(r.section_stats or "{}")
-                for s_key in sec_stats.keys():
-                    all_sections.add(s_key)
-            except: pass
-            
-        users_map = {u.id: u for u in db.query(User).filter(User.id.in_(list(user_ids))).all()}
-        analysis_by_section = {}
+        # Structure data for analysis
+        # We need a list of dicts: {user_id, group, section, performance, effort}
+        data = []
         
-        for section in sorted(list(all_sections)):
-            data = []
-            for r in results:
-                user = users_map.get(r.user_id)
-                if not user: continue
+        # Helper to parse JSON details
+        def get_details(json_str):
+            try: return json.loads(json_str) if json_str else {}
+            except: return {}
+
+        for r in results:
+            # 1. Overall
+            total_score = (r.translation_score or 0) + (r.sentence_score or 0)
+            data.append({
+                "user_id": r.user_id,
+                "name": r.user.email if r.user else "Unknown",
+                "group": r.group,
+                "section": "Overall",
+                "performance": total_score,
+                "effort": r.nasa_tlx_score or 0,
+                "attempt": r.attempt
+            })
+            
+            # 2. Break down by sections (Sentence, Vocabulary, Translation, etc.)
+            stats = get_details(r.section_stats)
+            nasa_details = get_details(r.nasa_details_json)
+            
+            # Map section scores directly from the stats dict
+            for sec_name, sec_score in stats.items():
+                if sec_name == "Total Score": continue # Already handled by "Overall"
                 
-                # Performance Score
-                if section == 'Overall':
-                    total = (r.translation_score or 0) + (r.sentence_score or 0)
-                    p_score = float(total) / 2.0
-                else:
-                    try:
-                        sec_stats = json.loads(r.section_stats or "{}")
-                        p_score = float(sec_stats.get(section, 0))
-                    except: p_score = 0.0
-                
-                # Effort Score (NASA Mental)
-                nasa_details = json.loads(r.nasa_details_json or "{}")
-                r_effort = float(nasa_details.get("mental", r.nasa_tlx_score or 50))
+                # Try to find matching effort (e.g. mental_Translation)
+                # Fallback to overall nasa_tlx_score
+                sec_effort = nasa_details.get(f"mental_{sec_name}", r.nasa_tlx_score or 0)
                 
                 data.append({
-                    "user_id": user.id,
-                    "name": user.email or f"User {user.id}",
-                    "group": r.group or "Unknown",
-                    "quiz_score": p_score,
-                    "nasa_mental": r_effort
+                     "user_id": r.user_id,
+                     "name": r.user.email if r.user else "Unknown",
+                     "group": r.group,
+                     "section": sec_name,
+                     "performance": float(sec_score),
+                     "effort": float(sec_effort),
+                     "attempt": r.attempt
                 })
-                
-            if len(data) < 2: continue
+
+        df = pd.DataFrame(data)
+        
+        if df.empty: return {"error": "No valid data found"}
+        
+        # Analysis per Section
+        output_sections = {}
+        
+        for section in df["section"].unique():
+            sec_df = df[df["section"] == section].copy()
             
-            # Z-Score Normalization
-            scores_p = [p["quiz_score"] for p in data]
-            scores_r = [p["nasa_mental"] for p in data]
+            # Needs at least 2 points for Z-score calc (std dev)
+            if len(sec_df) < 2: continue
             
-            mp, sdp = float(np.mean(scores_p)), float(np.std(scores_p, ddof=1) or 1.0)
-            mr, sdr = float(np.mean(scores_r)), float(np.std(scores_r, ddof=1) or 1.0)
+            # Calculate Z-Scores
+            P_mean = sec_df["performance"].mean()
+            P_std = sec_df["performance"].std(ddof=1)
+            R_mean = sec_df["effort"].mean()
+            R_std = sec_df["effort"].std(ddof=1)
             
-            for p in data:
-                p["Z_P"] = round((p["quiz_score"] - mp) / sdp, 3)
-                p["Z_R"] = round((p["nasa_mental"] - mr) / sdr, 3)
-                p["E"] = round((p["Z_P"] - p["Z_R"]) / math.sqrt(2), 3)
+            # Avoid division by zero
+            if P_std == 0: P_std = 1.0
+            if R_std == 0: R_std = 1.0
             
-            groups = {}
-            for p in data:
-                g = p["group"]
-                if g not in groups: groups[g] = []
-                groups[g].append(p["E"])
-                
+            sec_df["Z_P"] = (sec_df["performance"] - P_mean) / P_std
+            sec_df["Z_R"] = (sec_df["effort"] - R_mean) / R_std
+            
+            # Efficiency E = (Z_P - Z_R) / sqrt(2)
+            sec_df["E"] = (sec_df["Z_P"] - sec_df["Z_R"]) / math.sqrt(2)
+            
+            # Stats by Group
+            stats_output = {}
             group_averages = []
-            for g, e_list in groups.items():
-                pts = [p for p in data if p["group"] == g]
-                group_averages.append({
-                    "group": g,
-                    "Z_P_mean": round(float(np.mean([p["Z_P"] for p in pts])), 3),
-                    "Z_R_mean": round(float(np.mean([p["Z_R"] for p in pts])), 3),
-                    "E_mean": round(float(np.mean(e_list)), 3),
-                    "count": len(e_list),
-                    "quiz_score_mean": round(float(np.mean([p["quiz_score"] for p in pts])), 2),
-                    "nasa_mental_mean": round(float(np.mean([p["nasa_mental"] for p in pts])), 2)
-                })
-                
-            stats = {
-                "descriptive": {
-                    "M_performance": round(mp, 2), 
-                    "SD_performance": round(sdp, 2), 
-                    "M_effort": round(mr, 2), 
-                    "SD_effort": round(sdr, 2),
-                    "total_students": len(data),
-                    "num_groups": len(groups)
-                }
+            
+            # KW Test (if > 1 group and enough data)
+            groups = sec_df["group"].unique()
+            if len(groups) > 1:
+                group_data = [sec_df[sec_df["group"] == g]["E"].values for g in groups]
+                try:
+                    # Check if enough samples
+                    if all(len(g) >= 2 for g in group_data):
+                        # Use Wilcoxon if 2 groups, KW if > 2
+                        if len(groups) == 2:
+                            from scipy.stats import ranksums
+                            stat, p = ranksums(group_data[0], group_data[1])
+                            stats_output["wilcoxon"] = {"U": float(stat), "p": float(p), "significant": bool(p < 0.05)}
+                        else:
+                            stat, p = kruskal(*group_data)
+                            stats_output["kruskal_wallis"] = {"H": float(stat), "p": float(p), "significant": bool(p < 0.05)}
+                            
+                            # Post-hoc Dunn's
+                            if p < 0.05:
+                                p_values = sp.posthoc_dunn(sec_df, val_col='E', group_col='group', p_adjust='bonferroni')
+                                # Format dunn results
+                                dunn_res = []
+                                for i, g1 in enumerate(groups):
+                                    for j, g2 in enumerate(groups):
+                                        if i < j:
+                                            pv = p_values.loc[g1, g2]
+                                            dunn_res.append({
+                                                "group1": g1, "group2": g2, 
+                                                "p_value": float(pv), 
+                                                "significant": bool(pv < 0.05)
+                                            })
+                                stats_output["dunn"] = dunn_res
+                except Exception as ex:
+                    stats_output["error"] = str(ex)
+
+            # Group Averages
+            for g in groups:
+                 gdf = sec_df[sec_df["group"] == g]
+                 group_averages.append({
+                     "group": g,
+                     "count": len(gdf),
+                     "Z_R_mean": round(gdf["Z_R"].mean(), 2),
+                     "Z_P_mean": round(gdf["Z_P"].mean(), 2),
+                     "E_mean": round(gdf["E"].mean(), 2)
+                 })
+                 
+            # Descriptive Stats
+            stats_output["descriptive"] = {
+                "M_performance": round(P_mean, 2),
+                "SD_performance": round(P_std, 2),
+                "M_effort": round(R_mean, 2),
+                "SD_effort": round(R_std, 2),
+                "total_students": len(sec_df),
+                "num_groups": len(groups)
+            }
+
+            output_sections[section] = {
+                "individual_points": sec_df.to_dict(orient="records"),
+                "group_averages": group_averages,
+                "statistics": stats_output
             }
             
-            # Statistical Tests
-            if len(groups) == 2:
-                try:
-                    from scipy.stats import ranksums
-                    group_list = list(groups.values())
-                    stat, p_val = ranksums(group_list[0], group_list[1])
-                    stats["wilcoxon"] = {
-                        "U": round(float(stat), 4), 
-                        "p": round(float(p_val), 4), 
-                        "significant": bool(p_val < 0.05)
-                    }
-                except Exception as e:
-                    stats["error"] = f"Wilcoxon error: {str(e)}"
-            elif len(groups) > 2:
-                try:
-                    H, p_val = kruskal(*groups.values())
-                    stats["kruskal_wallis"] = {
-                        "H": round(float(H), 4), 
-                        "p": round(float(p_val), 4), 
-                        "significant": bool(p_val < 0.05)
-                    }
-                    if p_val < 0.05:
-                        df_dunn = pd.DataFrame([{"g": p["group"], "e": p["E"]} for p in data])
-                        dunn_res = sp.posthoc_dunn(df_dunn, val_col='e', group_col='g')
-                        
-                        dunn_list = []
-                        cols = dunn_res.columns.tolist()
-                        for i in range(len(cols)):
-                            for j in range(i+1, len(cols)):
-                                g1, g2 = cols[i], cols[j]
-                                p_v = float(dunn_res.loc[g1, g2])
-                                dunn_list.append({"group1": g1, "group2": g2, "p_value": round(p_v, 4), "significant": bool(p_v < 0.05)})
-                        stats["dunn"] = dunn_list
-                except Exception as e:
-                    stats["error"] = f"Kruskal-Wallis error: {str(e)}"
-                    
-            analysis_by_section[section] = {
-                "individual_points": data,
-                "group_averages": group_averages,
-                "statistics": stats
-            }
-                
-        return {"sections": analysis_by_section}
+        final_output = {"sections": output_sections}
+        
+        # Generate plot for 'Overall' or first avail section?
+        # Actually, separate endpoint handles plotting for admin.
+        # But wait, original code returned plot in analysis?
+        # No, "get_efficiency_analysis" returns data structure.
+        # "get_efficiency_plot" calls this and makes plots.
+        
+        # IMPORTANT: Previous version also had plot logic embedded?
+        # Checking lines 2400-2410 previously viewed (step 983) suggests "get_efficiency_analysis" 
+        # was returning plot images in 'results' for previous implementation?
+        # The code I replaced (lines 1778-1850 in step 989) was the duplicate.
+        # The ORIGINAL function (line 1778) seems to be the one we are keeping.
+        # Let's verify if *this* function (get_efficiency_analysis) needs to return images.
+        # Line 1943 calls `get_efficiency_analysis` and gets data to plot.
+        # So this function just computes data. Good.
+            
+        if not final_output["sections"]:
+            return {"msg": "Insufficient data for analysis (need at least 2 points per user)."}
+        
+        return final_output
+
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 @router.get("/efficiency_plot")
-async def get_efficiency_plot(course_id: int, db: Session = Depends(get_db)):
+async def get_efficiency_plot(course_id: int, target_attempt: int = None, db: Session = Depends(get_db)):
     """
     Teaching Efficiency Analysis Plot (Multi-Section Support & Refined Aesthetics)
     """
@@ -1726,28 +2149,19 @@ async def get_efficiency_plot(course_id: int, db: Session = Depends(get_db)):
         import numpy as np
         
         # Get data for all sections
-        results = await get_efficiency_analysis(course_id, db)
+        results = await get_efficiency_analysis(course_id, target_attempt, db)
         if "error" in results: return results
         
         sections_data = results.get("sections", {})
         plots = {}
         
         # Style settings
-        plt.rcParams['font.sans-serif'] = ['Arial', 'sans-serif'] # Fallback
+        plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial', 'sans-serif'] 
+        plt.rcParams['axes.unicode_minus'] = False
         MARKERS = {'A': 'o', 'B': 'x', 'C': 's', 'D': 'P', 'Unknown': '.'}
         
-        # Section Name Translation for Plot (Prevents Font Hang)
-        TRANSLATION = {
-            "Overall": "Overall",
-            "句子": "Sentence",
-            "單字": "Vocabulary",
-            "翻譯": "Translation"
-        }
-        
         for section, data in sections_data.items():
-            display_name = TRANSLATION.get(section, section)
-            # Filter non-ascii for title stability
-            safe_title = "".join([c if ord(c) < 128 else "?" for c in display_name])
+            display_name = section # Use original section name
             
             df = pd.DataFrame(data["individual_points"])
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
@@ -1784,7 +2198,7 @@ async def get_efficiency_plot(course_id: int, db: Session = Depends(get_db)):
 
             ax1.set_xlabel("Mental Effort Z-score (R)", fontweight='bold')
             ax1.set_ylabel("Performance Z-score (P)", fontweight='bold')
-            ax1.set_title(f"Efficiency Quadrant: {safe_title}", fontsize=14, pad=15)
+            ax1.set_title(f"Efficiency Quadrant: {display_name}", fontsize=14, pad=15)
             ax1.legend(title="Group", loc='upper right', frameon=True, shadow=False)
             ax1.grid(True, linestyle='-', alpha=0.1)
             
@@ -1819,11 +2233,11 @@ async def get_efficiency_plot(course_id: int, db: Session = Depends(get_db)):
             ax2.axhline(0, color='gray', linestyle='--', alpha=0.5, zorder=1)
             ax2.set_xlabel("Group", fontweight='bold')
             ax2.set_ylabel("Efficiency Score (E)", fontweight='bold')
-            ax2.set_title(f"Efficiency Distribution ({safe_title})", fontsize=14, pad=15)
+            ax2.set_title(f"Efficiency Distribution ({display_name})", fontsize=14, pad=15)
             ax2.grid(True, alpha=0.15, axis='y')
             ax2.tick_params(axis='x', labelsize=9)
             
-            plt.suptitle(f"Teaching Efficiency Analysis - {safe_title} (Course {course_id})", fontsize=18, fontweight='bold', y=0.98)
+            plt.suptitle(f"Teaching Efficiency Analysis - {display_name} (Course {course_id})", fontsize=18, fontweight='bold', y=0.98)
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
             
             buf = io.BytesIO()
@@ -1846,11 +2260,16 @@ async def get_efficiency_plot(course_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/user_efficiency_plot")
-async def get_user_efficiency_plot(course_id: int, user_id: int, db: Session = Depends(get_db)):
-    """
-    User-facing Efficiency Plot (Simplified for Stability)
-    """
+async def get_user_efficiency_plot(course_id: int, user_id: int, target_attempt: int = None, db: Session = Depends(get_db)):
     try:
+        # 1. Get Overall Analysis Data
+        analysis = await get_efficiency_analysis(course_id, target_attempt, db)
+        if "error" in analysis: return analysis
+        
+        all_sections = analysis.get("sections", {})
+        if not all_sections:
+             return {"error": "No efficiency data available"}
+             
         import pandas as pd
         import matplotlib
         matplotlib.use('Agg')
@@ -1859,67 +2278,107 @@ async def get_user_efficiency_plot(course_id: int, user_id: int, db: Session = D
         import base64
         import numpy as np
         
-        # Get data
-        analysis_res = await get_efficiency_analysis(course_id, db)
-        if "error" in analysis_res: raise HTTPException(400, analysis_res["error"])
+        # Style settings
+        plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial', 'sans-serif']
+        plt.rcParams['axes.unicode_minus'] = False
+        MARKERS = {'A': 'o', 'B': 'x', 'C': 's', 'D': 'P', 'Unknown': '.'}
         
-        # Use 'Overall' section for user plot
-        data = analysis_res.get("sections", {}).get("Overall", {})
-        if not data: raise HTTPException(404, "Overall analysis data not found")
+        final_results = {}
         
-        user_data = next((p for p in data.get("individual_points", []) if p["user_id"] == user_id), None)
-        if not user_data: raise HTTPException(404, "User data not found for this course")
-        
-        df = pd.DataFrame(data["individual_points"])
-        fig, ax = plt.subplots(figsize=(10, 8))
-        
-        lim = max(abs(df["Z_R"].max()), abs(df["Z_P"].max()), 2.5) + 0.5
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
-        
-        # Background
-        ax.fill_between([-lim, 0], 0, lim, color='lightgreen', alpha=0.1)
-        ax.fill_between([0, lim], -lim, 0, color='lightcoral', alpha=0.1)
-        
-        ax.axhline(0, color='black', alpha=0.2)
-        ax.axvline(0, color='black', alpha=0.2)
-        ax.plot([-lim, lim], [-lim, lim], 'k--', alpha=0.3)
-        
-        # Individual points (faded)
-        ax.scatter(df["Z_R"], df["Z_P"], alpha=0.2, s=50, c='gray')
-        
-        # YOUR POINT (Highlight)
-        ax.scatter(user_data["Z_R"], user_data["Z_P"], s=400, marker='*', c='gold', edgecolors='red', linewidths=2, label='YOU', zorder=10)
-        
-        ax.set_xlabel("Mental Effort (R)")
-        ax.set_ylabel("Learning Performance (P)")
-        ax.set_title("Your Learning Efficiency Position")
-        ax.legend()
-        ax.grid(True, alpha=0.2)
-        
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
-        plt.close(fig)
-        buf.seek(0)
-        img_b64 = base64.b64encode(buf.read()).decode('utf-8')
-        
-        # Evaluation
-        if user_data["E"] > 0:
-            quadrant = "High Efficiency" if user_data["Z_R"] < 0 else "High Performance"
-            msg = "Great! You achieved good results with efficient effort."
-        else:
-            quadrant = "Low Efficiency" if user_data["Z_R"] > 0 else "Low Performance"
-            msg = "You might need more practice or a different strategy."
+        for section_name, section_data in all_sections.items():
+            points = section_data.get("individual_points", [])
+            if not points: continue
             
-        return {
-            "image": f"data:image/png;base64,{img_b64}",
-            "user_data": user_data,
-            "quadrant": quadrant,
-            "message": msg,
-            "statistics": data.get("statistics")
-        }
+            df = pd.DataFrame(points)
+            
+            # Identify User
+            user_record = df[df["user_id"] == user_id]
+            if user_record.empty: continue
+            
+            # Take latest attempt (or the only one if filtered)
+            user_row = user_record.iloc[-1]
+            
+            # Setup Plot
+            fig, ax1 = plt.subplots(figsize=(10, 8))
+            
+            # Limits
+            lim = max(abs(df["Z_R"].max()), abs(df["Z_P"].max()), 2.5) + 0.5
+            ax1.set_xlim(-lim, lim)
+            ax1.set_ylim(-lim, lim)
+            ax1.set_facecolor('white')
+            
+            # Quadrant lines & Diagonal
+            ax1.axhline(0, color='gray', alpha=0.3, linewidth=1)
+            ax1.axvline(0, color='gray', alpha=0.3, linewidth=1)
+            ax1.plot([-lim, lim], [-lim, lim], color='gray', linestyle='--', alpha=0.5, label='Efficiency = 0')
+            
+            # Text Labels
+            ax1.text(-lim+0.2, lim-0.2, "High Efficiency", color='green', fontweight='bold', alpha=0.6, fontsize=12, va='top')
+            ax1.text(lim-0.2, -lim+0.2, "Low Efficiency", color='red', fontweight='bold', alpha=0.6, fontsize=12, ha='right', va='bottom')
+            
+            groups = sorted(df["group"].unique())
+            colors = plt.cm.get_cmap('tab10')(np.linspace(0, 1, len(groups)))
+            
+            for i, grp in enumerate(groups):
+                subset = df[df["group"] == grp]
+                m = MARKERS.get(grp, '.')
+                ax1.scatter(subset["Z_R"], subset["Z_P"], label=grp, alpha=0.5, s=80, color=colors[i], marker=m)
+                
+                z_r_mean = float(subset["Z_R"].mean())
+                z_p_mean = float(subset["Z_P"].mean())
+                ax1.scatter(z_r_mean, z_p_mean, color=colors[i], s=350, marker=m, edgecolor='black', linewidth=2.5, zorder=5)
+
+            # Highlight User
+            ax1.scatter(user_row["Z_R"], user_row["Z_P"], s=250, marker='D', color='red', edgecolor='gold', linewidth=1.5, label='YOU', zorder=100)
+            
+            display_name = section_name
+            ax1.set_xlabel("Mental Effort Z-score (R)", fontweight='bold')
+            ax1.set_ylabel("Performance Z-score (P)", fontweight='bold')
+            ax1.set_title(f"Teaching Efficiency Analysis - {display_name}", fontsize=14, pad=15)
+            
+            leg = ax1.legend(title="Group", loc='upper right', frameon=True, shadow=False)
+            for handle in leg.legend_handles:
+                 handle.set_alpha(1.0)
+            ax1.grid(True, linestyle='-', alpha=0.1)
+            
+            # Save
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=100)
+            plt.close(fig)
+            buf.seek(0)
+            img_b64 = base64.b64encode(buf.read()).decode('utf-8')
+            
+            # Message
+            E = float(user_row["E"])
+            msg = ""
+            if E > 0.5: msg = "Excellent! You are learning very efficiently."
+            elif E > 0: msg = "Good efficiency."
+            elif E > -0.5: msg = "Average efficiency. Keep practicing."
+            else: msg = "Low efficiency. You might be finding this difficult."
+            
+            quadrant = ""
+            zp, zr = float(user_row["Z_P"]), float(user_row["Z_R"])
+            if zp > 0 and zr < 0: quadrant = "High Efficiency"
+            elif zp > 0 and zr > 0: quadrant = "High Performance / High Effort"
+            elif zp < 0 and zr < 0: quadrant = "Low Performance / Low Effort"
+            else: quadrant = "Low Efficiency"
+            
+            final_results[section_name] = {
+                "image": f"data:image/png;base64,{img_b64}",
+                "user_data": {
+                    "Z_P": round(zp, 2),
+                    "Z_R": round(zr, 2),
+                    "E": round(E, 2)
+                },
+                "quadrant": quadrant,
+                "message": msg
+            }
+            
+        return {"sections": final_results}
     except Exception as e:
         import traceback
+        import sys
+        print(traceback.format_exc(), file=sys.stderr)
         return {"error": str(e), "traceback": traceback.format_exc()}
 
 
@@ -1997,20 +2456,22 @@ async def get_engagement_analysis(course_id: int, db: Session = Depends(get_db))
         if len(group_data) == 2:
             g1, g2 = list(group_data.keys())
             if len(group_data[g1]) > 0 and len(group_data[g2]) > 0:
+                from scipy.stats import ranksums
                 stat, p_val = ranksums(group_data[g1], group_data[g2])
                 stats_res = {
                     "test": "Wilcoxon Rank-Sum",
-                    "stat": round(float(stat), 4),
-                    "p_value": round(float(p_val), 4),
+                    "stat": float(stat),
+                    "p_value": float(p_val),
                     "significant": bool(p_val < 0.05)
                 }
         elif len(group_data) > 2:
             try:
+                from scipy.stats import kruskal
                 H, p_val = kruskal(*group_data.values())
                 stats_res = {
                     "test": "Kruskal-Wallis",
-                    "stat": round(float(H), 4),
-                    "p_value": round(float(p_val), 4),
+                    "stat": float(H),
+                    "p_value": float(p_val),
                     "significant": bool(p_val < 0.05)
                 }
                 if p_val < 0.05:
@@ -2103,3 +2564,120 @@ async def get_engagement_plot(course_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+@router.get("/time_series_stats")
+async def get_time_series_stats(
+    course_id: int = 1, 
+    attempts: str = None, # Comma separated list of attempts to include, e.g. "1,2,3"
+    db: Session = Depends(get_db)
+):
+    # 1. Fetch all valid results
+    results = db.query(QuizResult).filter(QuizResult.course_id == course_id, QuizResult.is_deleted == False).all()
+    if not results:
+        return {"msg": "No data available"}
+    
+    import pandas as pd
+    import json
+    from collections import defaultdict
+
+    # Parse desired attempts
+    target_attempts = []
+    if attempts:
+        try:
+            target_attempts = [int(a) for a in attempts.split(",") if a.strip().isdigit()]
+        except: pass
+    
+    # Data Collector: Section -> List of Records
+    section_data = defaultdict(list)
+    available_attempts = set()
+    
+    for r in results:
+        available_attempts.add(r.attempt)
+        
+        # Filter by attempt if requested
+        if target_attempts and r.attempt not in target_attempts:
+            continue
+            
+        # Determine Label
+        time_label = f"Test {r.attempt}"
+        
+        # Parse Section Stats
+        try:
+            sections = json.loads(r.section_stats) if r.section_stats else {}
+        except:
+            sections = {}
+            
+        # If no sections found, use Total Score as a fallback section
+        if not sections:
+            total = (r.translation_score or 0) + (r.sentence_score or 0)
+            sections = {"Total Score": total}
+            
+        # Add to respective lists
+        for sec_name, score in sections.items():
+            section_data[sec_name].append({
+                "user_id": r.user_id,
+                "Time": time_label,
+                "Score": score
+            })
+            
+        # Add Durations
+        durations = {
+            "Total Duration": r.learning_duration_seconds or 0,
+            "Learning Duration": 0,
+            "Quiz Duration": 0
+        }
+        try:
+            if r.stage_timing_json:
+                timings = json.loads(r.stage_timing_json)
+                q_time = timings.get("Quiz", 0) + timings.get("Test Intro", 0) + timings.get("Quiz Intro", 0)
+                durations["Quiz Duration"] = q_time
+                durations["Learning Duration"] = (r.learning_duration_seconds or 0) - q_time
+        except: 
+            durations["Learning Duration"] = r.learning_duration_seconds or 0
+
+        for d_name, d_val in durations.items():
+            section_data[d_name].append({
+                "user_id": r.user_id,
+                "Time": time_label,
+                "Score": d_val
+            })
+
+    if not section_data:
+         return {
+             "msg": "No data found for selected attempts",
+             "available_attempts": sorted(list(available_attempts))
+         }
+    
+    # Generate Plots for each section
+    final_output = {
+        "sections": [],
+        "available_attempts": sorted(list(available_attempts))
+    }
+    
+    for sec_name, data_list in section_data.items():
+        if not data_list: continue
+        
+        df = pd.DataFrame(data_list)
+        
+        # Determine title prefix: "Score Comparison" or "Time Comparison"
+        title_prefix = "Time Comparison" if "Duration" in sec_name or "Time" in sec_name else "Score Comparison"
+        
+        # Title: "Section Name"
+        res = perform_friedman_plot(df, "Score", "Time", "user_id", f"{title_prefix}: {sec_name}")
+        
+        if "error" not in res:
+            final_output["sections"].append({
+                "name": sec_name,
+                "plot": res["plot"],
+                "stats": res["stats"],
+                "table_data": res.get("table_data", [])
+            })
+        else:
+            # Optionally return error info for this section?
+            pass
+            
+    if not final_output["sections"]:
+        return {"msg": "Insufficient data for analysis (need at least 2 time points per user)."}
+        
+    return final_output
+

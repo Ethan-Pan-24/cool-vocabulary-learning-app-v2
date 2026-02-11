@@ -15,6 +15,15 @@
                     <option value="{{ c.id }}" {% if current_course_id==c.id %}selected{% endif %}>{{ c.name }}</option>
                     {% endfor %}
                 </select>
+
+                {% if current_course_id %}
+                <select name="attempt" class="form-select w-auto" onchange="this.form.submit()">
+                    <option value="">All Tests</option>
+                    {% for a in available_attempts %}
+                    <option value="{{ a }}" {% if current_attempt==a %}selected{% endif %}>Test {{ a }}</option>
+                    {% endfor %}
+                </select>
+                {% endif %}
             </form>
             <button class="btn btn-outline-danger" onclick="openTrashModal()">
                 <i class="bi bi-trash"></i> Recycle Bin
