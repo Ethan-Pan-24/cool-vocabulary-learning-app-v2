@@ -21,12 +21,17 @@ try:
         
         # Check response structure
         print("\n[TEST 2] Checking response structure...")
-        print(f"  - Has 'image' key: {'image' in data}")
-        print(f"  - Has 'statistics' key: {'statistics' in data}")
-        
-        if 'statistics' in data:
-            stats = data['statistics']
-            print(f"  - Statistics keys: {list(stats.keys())}")
+        if 'sections' in data:
+            print("✓ Has 'sections' key")
+            sections = data['sections']
+            print(f"  - Available sections: {list(sections.keys())}")
+            
+            if "Overall" in sections:
+                overall = sections["Overall"]
+                print(f"✓ Overall section found")
+                print(f"  - Has 'image': {'image' in overall}")
+                stats = overall.get('statistics', {})
+                print(f"  - Statistics keys: {list(stats.keys())}")
             
             if 'descriptive' in stats:
                 desc = stats['descriptive']

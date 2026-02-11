@@ -1,18 +1,12 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
 venv/
+__pycache__/
+*.log
+debug_*.txt
+git_*.txt
+git_list.py
+check_code.py
+.venv/
 .env
-
-# Database
-*.db
-*.sqlite3
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
+db.sqlite3
 .vscode/
 .idea/
