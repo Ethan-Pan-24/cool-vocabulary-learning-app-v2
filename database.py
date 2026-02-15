@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timedelta
 
 URSQLALCHEMY_DATABASE_URL = "sqlite:///./vocab_system_v2.db"
 
@@ -117,6 +117,28 @@ class ImageRating(Base):
     user = relationship("User")
     course = relationship("Course")
     vocabulary = relationship("Vocabulary")
+
+class DeletedContainer(Base):
+    """Store deleted groups and stages for trash bin recovery"""
+    __tablename__ = "deleted_containers"
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"))
+    type = Column(String)  # "group" or "stage"
+    name = Column(String)  # group name or stage name
+    parent_group = Column(String, nullable=True)  # For stages: which group it belonged to
+    
+    def datetime_utc8():
+        return datetime.utcnow() + timedelta(hours=8)
+        
+    deleted_at = Column(DateTime, default=datetime_utc8)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Store associated vocab IDs as JSON array
+    vocab_ids = Column(Text)  # JSON list of vocab IDs that were in this container
+    # Store stage config for stages (to preserve stage metadata)
+    stage_metadata = Column(Text, nullable=True)  # JSON object for stage properties
+    
+    course = relationship("Course")
+    deleter = relationship("User", foreign_keys=[deleted_by])
 
 def get_db():
     db = SessionLocal()

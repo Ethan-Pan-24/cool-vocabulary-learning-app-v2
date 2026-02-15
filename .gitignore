@@ -7,6 +7,7 @@ git_list.py
 check_code.py
 .venv/
 .env
+*.db
 db.sqlite3
 .vscode/
 .idea/

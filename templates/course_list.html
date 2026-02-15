@@ -225,6 +225,10 @@
                                 class="btn btn-sm btn-outline-secondary flex-grow-1">
                                 <i class="bi bi-pencil-square"></i> Manage Content
                             </a>
+                            <a href="/admin/course/{{ course.id }}/quiz_editor" class="btn btn-sm btn-outline-info"
+                                title="Edit Quiz">
+                                <i class="bi bi-question-square"></i>
+                            </a>
                             <button class="btn btn-sm btn-outline-warning"
                                 onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }})'>
                                 <i class="bi bi-gear"></i>
@@ -332,7 +336,7 @@
                     <div class="mb-3">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" name="is_public" value="true"
-                                id="isPublicSwitch" checked>
+                                id="isPublicSwitch">
                             <label class="form-check-label" for="isPublicSwitch">Public (Other learners can see and
                                 join)</label>
                         </div>

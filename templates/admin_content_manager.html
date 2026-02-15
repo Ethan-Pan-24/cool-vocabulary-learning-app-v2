@@ -174,6 +174,7 @@
         z-index: 2000;
     }
 </style>
+<link rel="stylesheet" href="/static/css/mobile-context-menu.css">
 
 <div class="container-fluid mt-3">
     <!-- Header -->
@@ -199,12 +200,19 @@
                 <!-- JS Populated -->
             </div>
             <div class="ms-auto d-flex gap-2">
+                <a href="/admin/course/{{ course.id }}/quiz_editor" class="btn btn-sm btn-outline-info">
+                    <i class="bi bi-question-square"></i> Edit Quiz
+                </a>
+                <div class="vr"></div>
                 <button class="btn btn-sm btn-outline-danger" onclick="openTrashCan()">
                     <i class="bi bi-trash3"></i> Recycle Bin
                 </button>
                 <div class="vr"></div>
                 <button class="btn btn-sm btn-outline-warning" onclick="undoLastAction()" id="btnGlobalUndo" disabled>
                     <i class="bi bi-arrow-counterclockwise"></i> Undo
+                </button>
+                <button class="btn btn-sm btn-success" onclick="cm.newGroup()" id="btnAddGroup">
+                    <i class="bi bi-folder-plus"></i> Add Group
                 </button>
                 <button class="btn btn-sm btn-outline-secondary" onclick="createNewFolder()" id="btnNewFolder" disabled>
                     <i class="bi bi-folder-plus"></i> New Stage
@@ -1668,27 +1676,63 @@
             const data = await resp.json();
 
             if (data.status === 'success') {
-                if (data.items.length === 0) {
+                if (data.items.length === 0 && (!data.containers || data.containers.length === 0)) {
                     listEl.innerHTML = '<div class="text-center text-muted p-3">Trash is empty</div>';
                     return;
                 }
 
-                let html = '<ul class="list-group list-group-flush">';
-                data.items.forEach(item => {
-                    html += `
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
-                            <span class="fw-bold">${item.word}</span>
-                            <small class="text-muted ms-2">${item.chinese_meaning}</small>
-                            <div class="small text-muted" style="font-size:0.75em;">Group: ${item.group} | Stage: ${item.stage}</div>
-                        </div>
-                        <div>
-                            <button class="btn btn-sm btn-success me-1" onclick="restoreTrashItem(${item.id})">Restore</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTrashItem(${item.id})">Delete</button>
-                        </div>
-                    </li>`;
-                });
-                html += '</ul>';
+                let html = '';
+
+                // 1. Deleted Containers (Groups/Stages)
+                if (data.containers && data.containers.length > 0) {
+                    html += '<h6 class="px-3 pt-3 text-primary"><i class="bi bi-folder"></i> Deleted Groups & Stages</h6>';
+                    html += '<ul class="list-group list-group-flush mb-3">';
+                    data.containers.forEach(c => {
+                        const icon = c.type === 'group' ? 'bi-folder-fill text-warning' : 'bi-folder text-primary';
+                        const typeLabel = c.type.charAt(0).toUpperCase() + c.type.slice(1);
+                        const parentInfo = c.parent_group ? `<small class="text-muted ms-2">in ${c.parent_group}</small>` : '';
+
+                        html += `
+                        <li class="list-group-item d-flex justify-content-between align-items-center bg-light">
+                            <div>
+                                <i class="bi ${icon} me-2"></i>
+                                <span class="fw-bold">${c.name}</span>
+                                <span class="badge bg-secondary ms-2">${typeLabel}</span>
+                                ${parentInfo}
+                                <div class="small text-muted ms-4" style="font-size:0.75em;">
+                                    Contains ${c.vocab_count} items • Deleted: ${c.deleted_at ? new Date(c.deleted_at).toLocaleString() : 'N/A'}
+                                </div>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-success me-1" onclick="restoreContainer(${c.id})">Restore</button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteContainer(${c.id})">Delete</button>
+                            </div>
+                        </li>`;
+                    });
+                    html += '</ul>';
+                }
+
+                // 2. Deleted Vocabularies
+                if (data.items.length > 0) {
+                    html += '<h6 class="px-3 pt-2 text-primary"><i class="bi bi-file-text"></i> Deleted Words</h6>';
+                    html += '<ul class="list-group list-group-flush">';
+                    data.items.forEach(item => {
+                        html += `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="fw-bold">${item.word}</span>
+                                <small class="text-muted ms-2">${item.chinese_meaning}</small>
+                                <div class="small text-muted" style="font-size:0.75em;">Group: ${item.group} | Stage: ${item.stage}</div>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-success me-1" onclick="restoreTrashItem(${item.id})">Restore</button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteTrashItem(${item.id})">Delete</button>
+                            </div>
+                        </li>`;
+                    });
+                    html += '</ul>';
+                }
+
                 listEl.innerHTML = html;
             } else {
                 listEl.innerHTML = '<div class="text-danger p-3">Failed to load trash</div>';
@@ -1704,7 +1748,7 @@
         try {
             const resp = await fetch(`/admin_api/restore_vocab/${id}`, { method: 'POST' });
             if (resp.ok) {
-                await loadTrashData(); // Refresh list only
+                await loadTrashData();
                 sessionStorage.setItem('cm_needs_reload', 'true');
             }
         } catch (e) { console.error(e); }
@@ -1718,8 +1762,34 @@
         } catch (e) { console.error(e); }
     }
 
+    async function restoreContainer(id) {
+        if (!confirm("Restore this group/stage and its contents?")) return;
+        try {
+            const resp = await fetch(`/admin_api/restore_container/${id}`, { method: 'POST' });
+            const data = await resp.json();
+            if (resp.ok) {
+                alert(data.msg);
+                await loadTrashData();
+                sessionStorage.setItem('cm_needs_reload', 'true');
+            } else {
+                alert("Error: " + (data.detail || data.msg || "Unknown error"));
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error restoring container");
+        }
+    }
+
+    async function deleteContainer(id) {
+        if (!confirm("Permanently delete this group/stage and ALL its contents? This cannot be undone.")) return;
+        try {
+            const resp = await fetch(`/admin_api/permanent_delete_container/${id}`, { method: 'POST' });
+            if (resp.ok) await loadTrashData();
+        } catch (e) { console.error(e); }
+    }
+
     async function emptyTrash() {
-        if (!confirm("CORRECT: Delete ALL items in trash permanently?")) return;
+        if (!confirm("CORRECT: Delete ALL items (including groups/stages) in trash permanently?")) return;
         try {
             const resp = await fetch(`/admin_api/empty_trash/${COURSE_ID}`, { method: 'POST' });
             if (resp.ok) await loadTrashData();
@@ -1749,3 +1819,26 @@
 </div>
 
 {% endblock %}
+<!-- Mobile Context Menu Support -->
+<script src="/static/js/mobile-context-menu.js"></script>
+<script>
+    // Initialize long-press support for file view
+    document.addEventListener('DOMContentLoaded', function () {
+        const fileView = document.getElementById('fileView');
+        if (fileView) {
+            setupLongPress(fileView, function (target, event) {
+                // Find the explorer item or allow background click
+                const explorerItem = target.closest('.explorer-item');
+                if (explorerItem) {
+                    // Select the item if not already selected
+                    const key = explorerItem.dataset.key;
+                    if (!sel.selectedIds.has(key)) {
+                        sel.select(key, { ctrl: false, shift: false });
+                    }
+                }
+                // Show the context menu (background or item)
+                cm.show(event.pageX, event.pageY);
+            });
+        }
+    });
+</script>

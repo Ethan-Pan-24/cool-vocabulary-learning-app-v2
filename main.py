@@ -17,6 +17,7 @@ load_dotenv() # Load variables from .env
 
 app = FastAPI()
 # Reload Trigger 3
+init_db() # Ensure tables are created
 
 # Session for OAuth - Environment variable used for production
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "fallback-secret-key"))
@@ -108,28 +109,8 @@ async def login_page(request: Request, user: User = Depends(get_current_user_req
 
 @app.post("/login")
 async def login(request: Request, email: str = Form(...), db: Session = Depends(get_db)):
-    email = email.strip()
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        user = User(email=email)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    # Validated by Google or Admin Form
-    
-    # Case-insensitive admin check
-    is_admin_login = email.lower() in [e.lower() for e in ADMIN_EMAILS]
-
-    if is_admin_login:
-        # User requested to block admin logins from this form and redirect to home
-        return RedirectResponse(url="/", status_code=303)
-
-    # Simple session cookie (In prod use secure signed cookies)
-    response = RedirectResponse(url="/courses", status_code=status.HTTP_303_SEE_OTHER)
-    
-    response.set_cookie(key="user_email", value=email)
-    return response
+    # Redirect all login attempts to homepage - no actual login functionality
+    return RedirectResponse(url="/", status_code=303)
 
 @app.get("/97110424", response_class=HTMLResponse)
 async def secret_admin_login(request: Request):
@@ -150,11 +131,13 @@ async def course_list(request: Request, user: User = Depends(get_current_user_re
     for c in all_courses:
         is_official = False
         if c.creator_id is None:
+            # Legacy courses without creator - always official
             is_official = True
         else:
             creator = db.query(User).filter(User.id == c.creator_id).first()
             if creator and creator.email in ADMIN_EMAILS:
-                is_official = True
+                # Admin courses: only show as official if is_public is True
+                is_official = c.is_public
         
         if is_official:
             official_courses.append(c)
@@ -274,6 +257,10 @@ async def admin_panel(request: Request, user: User = Depends(get_current_user_re
 async def admin_course_detail(course_id: int, request: Request, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
     # Legacy route: Redirect to new consolidated Content Manager
     return RedirectResponse(url=f"/admin/course/{course_id}/content_manager", status_code=303)
+
+@app.get("/admin/course/{course_id}/quiz_editor", response_class=HTMLResponse)
+async def admin_course_quiz_editor(course_id: int, request: Request, user: User = Depends(get_current_user_req), db: Session = Depends(get_db)):
+
 
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -1211,6 +1198,12 @@ async def track_image_interaction(
     
     db.commit()
     return {"status": "success"}
+
+# Catch-all route: redirect any undefined path to homepage
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    """Redirect all undefined routes to the main page"""
+    return RedirectResponse(url="/", status_code=303)
 
 if __name__ == "__main__":
     import uvicorn

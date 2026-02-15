@@ -93,12 +93,15 @@ async def update_course(
         if user and not user.is_admin and course.creator_id != user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
             
-        group_list = [g.strip() for g in groups.split(",") if g.strip()]
-        cleaned_groups = ",".join(group_list)
+        # Only update group_names if groups parameter is provided and not empty
+        # This prevents clearing groups when editing course settings from course_list.html
+        if groups:
+            group_list = [g.strip() for g in groups.split(",") if g.strip()]
+            cleaned_groups = ",".join(group_list)
+            course.group_names = cleaned_groups
         
         course.name = name
         course.description = description
-        course.group_names = cleaned_groups
         course.quiz_time_limit = quiz_time_limit
         course.is_public = is_public
         course.hashtags = hashtags
@@ -201,10 +204,18 @@ async def update_course_stages(
     course_id: int, 
     stage_config: str = Form("[]"), 
     target_group: str = Form(None), # Optional: if set, only update this group's key
-    redirect_to: str = Form(None), 
+    redirect_to: str = Form(None),
+    user: User = Depends(get_current_user_req),
     db: Session = Depends(get_db)
 ):
     course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
     if course:
         import json
         new_stages = json.loads(stage_config)
@@ -241,11 +252,16 @@ async def rename_group(
     course_id: int = Form(...),
     old_name: str = Form(...),
     new_name: str = Form(...),
+    user: User = Depends(get_current_user_req),
     db: Session = Depends(get_db)
 ):
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     # 1. Update Course.group_names
     if course.group_names:
@@ -279,11 +295,16 @@ async def rename_group(
 async def add_group(
     course_id: int = Form(...),
     group_name: str = Form(...),
+    user: User = Depends(get_current_user_req),
     db: Session = Depends(get_db)
 ):
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
     
     current_groups = [g.strip() for g in (course.group_names or "").split(",") if g.strip()]
     if group_name not in current_groups:
@@ -297,6 +318,7 @@ async def add_group(
 async def delete_group(
     course_id: int = Form(...),
     group_name: str = Form(...),
+    user: User = Depends(get_current_user_req),
     db: Session = Depends(get_db)
 ):
     group_name = group_name.strip()
@@ -304,15 +326,43 @@ async def delete_group(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Get all vocabularies in this group
+    vocab_in_group = db.query(Vocabulary).filter(
+        Vocabulary.course_id == course_id,
+        Vocabulary.group == group_name,
+        Vocabulary.is_deleted == False
+    ).all()
+    
+    # Save to deleted_containers for recovery
+    import json
+    from database import DeletedContainer
+    
+    deleted_container = DeletedContainer(
+        course_id=course_id,
+        type="group",
+        name=group_name,
+        parent_group=None,
+        deleted_by=user.id if user else None,
+        vocab_ids=json.dumps([v.id for v in vocab_in_group])
+    )
+    db.add(deleted_container)
+    
+    # Mark vocabularies as deleted (soft delete)
+    for vocab in vocab_in_group:
+        vocab.is_deleted = True
+    
     # 1. Update Course.group_names
     current_groups = [g.strip() for g in (course.group_names or "").split(",") if g.strip()]
     if group_name in current_groups:
         current_groups.remove(group_name)
         course.group_names = ",".join(current_groups)
         
-    # 2. Update Stage Config
+    # 2. Update Stage Config (remove all stages in this group)
     if course.stage_config:
-        import json
         try:
             config = json.loads(course.stage_config)
             if isinstance(config, dict) and group_name in config:
@@ -321,25 +371,68 @@ async def delete_group(
         except:
             pass
 
-    # 3. Clean up Vocab/Enrollment?
-    # Requirement: "orphaned" is acceptable for now.
-    
     db.commit()
-    return {"status": "success"}
+    return {"status": "success", "msg": f"Group '{group_name}' moved to trash"}
 
 @router.post("/delete_stage")
 async def delete_stage(
     course_id: int = Form(...),
     group_name: str = Form(...),
     stage_name: str = Form(...),
+    user: User = Depends(get_current_user_req),
     db: Session = Depends(get_db)
 ):
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Get all vocabularies in this stage
+    vocab_in_stage = db.query(Vocabulary).filter(
+        Vocabulary.course_id == course_id,
+        Vocabulary.group == group_name,
+        Vocabulary.stage == stage_name,
+        Vocabulary.is_deleted == False
+    ).all()
+    
+    # Get stage metadata from stage_config
+    import json
+    from database import DeletedContainer
+    stage_metadata = None
+    
     if course.stage_config:
-        import json
+        try:
+            config = json.loads(course.stage_config)
+            if isinstance(config, dict) and group_name in config:
+                # Find the stage object
+                for stage_obj in config[group_name]:
+                    if stage_obj.get('name') == stage_name:
+                        stage_metadata = json.dumps(stage_obj)
+                        break
+        except Exception as e:
+            pass
+    
+    # Save to deleted_containers for recovery
+    deleted_container = DeletedContainer(
+        course_id=course_id,
+        type="stage",
+        name=stage_name,
+        parent_group=group_name,
+        deleted_by=user.id if user else None,
+        vocab_ids=json.dumps([v.id for v in vocab_in_stage]),
+        stage_metadata=stage_metadata
+    )
+    db.add(deleted_container)
+    
+    # Mark vocabularies as deleted (soft delete)
+    for vocab in vocab_in_stage:
+        vocab.is_deleted = True
+
+    # Remove stage from stage_config
+    if course.stage_config:
         try:
             config = json.loads(course.stage_config)
             if isinstance(config, dict) and group_name in config:
@@ -350,7 +443,7 @@ async def delete_stage(
         except Exception as e:
             return {"status": "error", "msg": str(e)}
 
-    return {"status": "success"}
+    return {"status": "success", "msg": f"Stage '{stage_name}' moved to trash"}
 
 
 @router.post("/add_word")
@@ -423,12 +516,26 @@ async def delete_vocab_batch(ids: List[int] = Body(...), db: Session = Depends(g
     return {"status": "success", "msg": f"{len(ids)} items deleted"}
 
 @router.post("/restore_vocab/{vocab_id}")
-async def restore_vocab(vocab_id: int, db: Session = Depends(get_db)):
+async def restore_vocab(
+    vocab_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
     vocab = db.query(Vocabulary).filter(Vocabulary.id == vocab_id).first()
-    if vocab:
-        # Restore
-        vocab.is_deleted = False
-        db.commit()
+    if not vocab:
+        raise HTTPException(status_code=404, detail="Vocabulary not found")
+    
+    course = db.query(Course).filter(Course.id == vocab.course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Restore
+    vocab.is_deleted = False
+    db.commit()
     return {"status": "success", "msg": "Vocabulary restored"}
 
 @router.post("/restore_vocab_batch")
@@ -439,11 +546,31 @@ async def restore_vocab_batch(ids: List[int] = Body(...), db: Session = Depends(
     return {"status": "success", "msg": f"{len(ids)} items restored"}
 
 @router.get("/get_trash/{course_id}")
-async def get_trash(course_id: int, db: Session = Depends(get_db)):
+async def get_trash(
+    course_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Get deleted vocabularies
     deleted_items = db.query(Vocabulary).filter(
         Vocabulary.course_id == course_id,
         Vocabulary.is_deleted == True
     ).all()
+    
+    # Get deleted containers (groups and stages)
+    from database import DeletedContainer
+    import json
+    deleted_containers = db.query(DeletedContainer).filter(
+        DeletedContainer.course_id == course_id
+    ).order_by(DeletedContainer.deleted_at.desc()).all()
     
     return {
         "status": "success",
@@ -455,23 +582,67 @@ async def get_trash(course_id: int, db: Session = Depends(get_db)):
                 "group": v.group,
                 "stage": v.stage
             } for v in deleted_items
+        ],
+        "containers": [
+            {
+                "id": c.id,
+                "type": c.type,
+                "name": c.name,
+                "parent_group": c.parent_group,
+                "vocab_count": len(json.loads(c.vocab_ids)) if c.vocab_ids else 0,
+                "deleted_at": c.deleted_at.isoformat() if c.deleted_at else None
+            } for c in deleted_containers
         ]
     }
 
 @router.post("/permanent_delete_vocab/{vocab_id}")
-async def permanent_delete_vocab(vocab_id: int, db: Session = Depends(get_db)):
+async def permanent_delete_vocab(
+    vocab_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
     vocab = db.query(Vocabulary).filter(Vocabulary.id == vocab_id).first()
-    if vocab:
-        db.delete(vocab)
-        db.commit()
+    if not vocab:
+        raise HTTPException(status_code=404, detail="Vocabulary not found")
+    
+    course = db.query(Course).filter(Course.id == vocab.course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    db.delete(vocab)
+    db.commit()
     return {"status": "success", "msg": "Permanently deleted"}
 
 @router.post("/empty_trash/{course_id}")
-async def empty_trash(course_id: int, db: Session = Depends(get_db)):
+async def empty_trash(
+    course_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Delete all deleted vocabularies
     db.query(Vocabulary).filter(
         Vocabulary.course_id == course_id,
         Vocabulary.is_deleted == True
     ).delete(synchronize_session=False)
+    
+    # Delete all deleted containers (groups and stages)
+    from database import DeletedContainer
+    db.query(DeletedContainer).filter(
+        DeletedContainer.course_id == course_id
+    ).delete(synchronize_session=False)
+    
     db.commit()
     return {"status": "success", "msg": "Trash emptied"}
 
@@ -542,11 +713,16 @@ async def get_course_quiz_config(course_id: int, db: Session = Depends(get_db)):
 async def save_course_quiz_config(
     course_id: int,
     quiz_config: str = Form(...),
+    user: User = Depends(get_current_user_req),
     db: Session = Depends(get_db)
 ):
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         return {"status": "error", "msg": "Course not found"}
+    
+    # Permission check: Admin OR course creator
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this course")
         
     course.quiz_config = quiz_config
     db.commit()
@@ -2681,3 +2857,137 @@ async def get_time_series_stats(
         
     return final_output
 
+
+@router.post("/toggle_course_privacy/{course_id}")
+async def toggle_course_privacy(
+    course_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    """Toggle course is_public status. Only admin can call this."""
+    if not user or not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Toggle is_public
+    course.is_public = not course.is_public
+    db.commit()
+    
+    return {
+        "status": "success", 
+        "is_public": course.is_public,
+        "message": f"Course is now {'public' if course.is_public else 'private'}"
+    }
+
+@router.post("/restore_container/{container_id}")
+async def restore_container(
+    container_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    """Restore a deleted group or stage from trash"""
+    from database import DeletedContainer
+    import json
+    
+    container = db.query(DeletedContainer).filter(DeletedContainer.id == container_id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found")
+    
+    course = db.query(Course).filter(Course.id == container.course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    try:
+        if container.type == "group":
+            # Restore group to group_names
+            current_groups = [g.strip() for g in (course.group_names or "").split(",") if g.strip()]
+            if container.name not in current_groups:
+                current_groups.append(container.name)
+                course.group_names = ",".join(current_groups)
+            
+            # Restore vocabularies
+            vocab_ids = json.loads(container.vocab_ids) if container.vocab_ids else []
+            db.query(Vocabulary).filter(Vocabulary.id.in_(vocab_ids)).update(
+                {Vocabulary.is_deleted: False}, synchronize_session=False
+            )
+            
+        elif container.type == "stage":
+            # Restore stage to stage_config
+            config = json.loads(course.stage_config) if course.stage_config else {}
+            if not isinstance(config, dict):
+                config = {}
+            
+            parent_group = container.parent_group
+            if parent_group not in config:
+                config[parent_group] = []
+            
+            # Add stage back if metadata exists
+            if container.stage_metadata:
+                stage_obj = json.loads(container.stage_metadata)
+                # Check if stage already exists
+                stage_exists = any(s.get('name') == container.name for s in config[parent_group])
+                if not stage_exists:
+                    config[parent_group].append(stage_obj)
+            else:
+                # Create basic stage object
+                stage_exists = any(s.get('name') == container.name for s in config[parent_group])
+                if not stage_exists:
+                    config[parent_group].append({"name": container.name})
+            
+            course.stage_config = json.dumps(config)
+            
+            # Restore vocabularies
+            vocab_ids = json.loads(container.vocab_ids) if container.vocab_ids else []
+            db.query(Vocabulary).filter(Vocabulary.id.in_(vocab_ids)).update(
+                {Vocabulary.is_deleted: False}, synchronize_session=False
+            )
+        
+        # Delete the container record
+        db.delete(container)
+        db.commit()
+        
+        return {"status": "success", "msg": f"{container.type.capitalize()} '{container.name}' restored"}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to restore: {str(e)}")
+
+
+@router.post("/permanent_delete_container/{container_id}")
+async def permanent_delete_container(
+    container_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    """Permanently delete a container and its vocabularies"""
+    from database import DeletedContainer
+    import json
+    
+    container = db.query(DeletedContainer).filter(DeletedContainer.id == container_id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found")
+    
+    course = db.query(Course).filter(Course.id == container.course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Permission check
+    if not user or (not user.is_admin and course.creator_id != user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Permanently delete associated vocabularies
+    vocab_ids = json.loads(container.vocab_ids) if container.vocab_ids else []
+    db.query(Vocabulary).filter(Vocabulary.id.in_(vocab_ids)).delete(synchronize_session=False)
+    
+    # Delete the container record
+    db.delete(container)
+    db.commit()
+    
+    return {"status": "success", "msg": f"{container.type.capitalize()} permanently deleted"}

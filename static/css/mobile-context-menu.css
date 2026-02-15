@@ -1,0 +1,72 @@
+/* Mobile Context Menu Styles */
+
+.context-menu {
+    position: fixed;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    z-index: 9999;
+    min-width: 200px;
+    padding: 8px 0;
+    animation: contextMenuFadeIn 0.15s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.context-menu-item {
+    padding: 14px 18px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background-color 0.2s;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.context-menu-item:hover,
+.context-menu-item:active {
+    background-color: #f5f5f5;
+}
+
+.context-menu-item.context-menu-cancel {
+    border-top: 1px solid #eee;
+    color: #dc3545;
+}
+
+.context-menu-item.context-menu-danger {
+    color: #dc3545;
+}
+
+.menu-icon {
+    font-size: 20px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* Touch feedback */
+.context-menu-item:active {
+    background-color: #e9ecef;
+}
+
+/* Prevent text selection during long press */
+.vocab-item,
+[data-item-id],
+[data-vocab-id] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
