@@ -159,8 +159,8 @@ async def course_list(request: Request, user: User = Depends(get_current_user_re
         if is_official:
             official_courses.append(c)
         else:
-            # Community courses: public OR owned by current user
-            if c.is_public or c.creator_id == user.id:
+            # Community courses: public OR owned by current user OR user is admin
+            if c.is_public or c.creator_id == user.id or getattr(user, "is_admin", False):
                 community_courses.append(c)
         
         # Created by You
