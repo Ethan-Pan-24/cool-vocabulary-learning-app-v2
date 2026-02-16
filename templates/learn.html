@@ -164,11 +164,6 @@
     }
 
     window.saveAndProceed = function (url) {
-        // Confirmation Warning
-        if (!confirm("Are you sure you want to proceed? You cannot return to the previous stage once you continue.")) {
-            return;
-        }
-
         // 1. Update Stage Time Map
         let stageData = {};
         try {
