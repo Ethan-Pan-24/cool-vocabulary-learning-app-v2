@@ -13,6 +13,43 @@
         color: #0066cc;
         font-weight: bold;
         text-decoration: underline;
+        cursor: pointer;
+        position: relative;
+    }
+
+    .word-tooltip {
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: #333;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+        white-space: nowrap;
+        z-index: 1000;
+        margin-bottom: 5px;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s, visibility 0.2s;
+        font-weight: normal;
+        text-decoration: none;
+    }
+
+    .word-tooltip::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: #333;
+    }
+
+    .word-tooltip.show {
+        opacity: 1;
+        visibility: visible;
     }
 </style>
 <div class="container" style="max-width: 800px;">
@@ -87,7 +124,7 @@
                         <div class="p-4">
                             <i class="bi bi-quote text-muted fs-4"></i>
                             <p class="fst-italic text-dark mb-0 lead story-text" data-word="{{ item.word }}"
-                                style="line-height: 1.6;">
+                                data-meaning="{{ item.chinese_meaning }}" style="line-height: 1.6;">
                                 {{ item.story }}
                             </p>
                         </div>
@@ -97,7 +134,7 @@
                     <div class="col-12 text-center p-5">
                         <i class="bi bi-book text-muted fs-2 mb-3"></i>
                         <p class="fst-italic text-dark mb-0 display-6 story-text" data-word="{{ item.word }}"
-                            style="font-size: 1.5rem; line-height: 1.8;">
+                            data-meaning="{{ item.chinese_meaning }}" style="font-size: 1.5rem; line-height: 1.8;">
                             "{{ item.story }}"
                         </p>
                     </div>
@@ -201,17 +238,62 @@
         fetch('/api/image_interaction', { method: 'POST', body: formData }).catch(e => console.error('View tracking failed', e));
     }
 
-    // Highlight target word in story text
+    // Highlight target words in story text
     function highlightWordsInStory() {
         document.querySelectorAll('.story-text').forEach(paragraph => {
-            const targetWord = paragraph.getAttribute('data-word');
-            if (!targetWord) return;
+            const targetWords = paragraph.getAttribute('data-word');
+            const meaning = paragraph.getAttribute('data-meaning');
+            if (!targetWords) return;
 
+            // Support comma-separated words and meanings
+            const words = targetWords.split(',').map(w => w.trim()).filter(w => w);
+            const meanings = meaning.split(',').map(m => m.trim());
             let text = paragraph.innerHTML;
-            // Create case-insensitive regex to match whole words
-            const regex = new RegExp(`\\b(${targetWord})\\b`, 'gi');
-            text = text.replace(regex, '<span class="highlighted-word">$1</span>');
+
+            // Highlight each word with its corresponding meaning
+            words.forEach((word, index) => {
+                // Escape special regex characters
+                const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Create case-insensitive regex to match whole words
+                const regex = new RegExp(`\\b(${escapedWord})\\b`, 'gi');
+                const wordMeaning = meanings[index] || meaning; // Fallback to full meaning if index not found
+                text = text.replace(regex, `<span class="highlighted-word" data-meaning="${wordMeaning}" data-word="${word}">$1</span>`);
+            });
+
             paragraph.innerHTML = text;
+        });
+
+        // Add click handlers to all highlighted words
+        document.querySelectorAll('.highlighted-word').forEach(span => {
+            span.addEventListener('click', function (e) {
+                e.stopPropagation();
+
+                // Remove any existing tooltips
+                document.querySelectorAll('.word-tooltip').forEach(t => t.remove());
+
+                // Check if this word already has a visible tooltip
+                const existingTooltip = this.querySelector('.word-tooltip.show');
+                if (existingTooltip) {
+                    existingTooltip.remove();
+                    return;
+                }
+
+                // Create and show tooltip
+                const tooltip = document.createElement('div');
+                tooltip.className = 'word-tooltip show';
+                tooltip.textContent = this.getAttribute('data-meaning');
+                this.appendChild(tooltip);
+
+                // Close tooltip when clicking outside
+                setTimeout(() => {
+                    document.addEventListener('click', function closeTooltip(e) {
+                        if (!tooltip.contains(e.target)) {
+                            tooltip.remove();
+                            document.removeEventListener('click', closeTooltip);
+                        }
+                    });
+                }, 10);
+            });
         });
     }
 

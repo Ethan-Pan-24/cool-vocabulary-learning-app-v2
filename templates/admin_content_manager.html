@@ -339,8 +339,12 @@
                         <input type="text" name="word" id="editWordWord" class="form-control" required>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label small">Meaning</label>
-                        <input type="text" name="chinese" id="editWordChinese" class="form-control" required>
+                        <label class="form-label small">Meaning(s)</label>
+                        <small class="text-muted d-block mb-1">Separate meanings with comma if you have multiple
+                            words</small>
+                        <div id="meaningsContainer">
+                            <input type="text" name="chinese" id="editWordChinese" class="form-control" required>
+                        </div>
                     </div>
                     <div class="mb-2">
                         <label class="form-label small">Story</label>
@@ -1307,10 +1311,67 @@
         new bootstrap.Modal(document.getElementById('addWordModal')).show();
     }
 
+    // Update meaning fields based on number of words
+    function updateMeaningFields(wordString, meaningString) {
+        const words = wordString.split(',').map(w => w.trim()).filter(w => w);
+        const meanings = meaningString.split(',').map(m => m.trim());
+
+        const container = document.getElementById('meaningsContainer');
+        container.innerHTML = '';
+
+        if (words.length === 0) {
+            // Fallback to single field
+            container.innerHTML = '<input type="text" name="chinese" id="editWordChinese" class="form-control" required>';
+            return;
+        }
+
+        words.forEach((word, index) => {
+            const fieldDiv = document.createElement('div');
+            fieldDiv.className = 'meaning-field mb-2';
+
+            const label = document.createElement('label');
+            label.className = 'form-label small text-primary';
+            label.textContent = `Word ${index + 1}: "${word}"`;
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.name = index === 0 ? 'chinese' : `meaning_${index}`;
+            input.className = 'form-control meaning-input';
+            input.placeholder = `Chinese meaning for "${word}"`;
+            input.value = meanings[index] || '';
+            input.required = true;
+            input.dataset.wordIndex = index;
+
+            fieldDiv.appendChild(label);
+            fieldDiv.appendChild(input);
+            container.appendChild(fieldDiv);
+        });
+    }
+
+    // Add event listener to word field for dynamic meaning field generation
+    document.addEventListener('DOMContentLoaded', function () {
+        const editWordField = document.getElementById('editWordWord');
+        if (editWordField) {
+            editWordField.addEventListener('input', function () {
+                const currentMeanings = collectCurrentMeanings();
+                updateMeaningFields(this.value, currentMeanings);
+            });
+        }
+    });
+
+    // Collect current meanings from all input fields
+    function collectCurrentMeanings() {
+        const inputs = document.querySelectorAll('.meaning-input');
+        return Array.from(inputs).map(input => input.value).join(', ');
+    }
+
     function openEditModal(data) {
         document.getElementById('editVocabId').value = data.id;
         document.getElementById('editWordWord').value = data.word;
-        document.getElementById('editWordChinese').value = data.chinese_meaning || "";
+
+        // Generate meaning fields based on word count
+        updateMeaningFields(data.word, data.chinese_meaning || "");
+
         document.getElementById('editWordStory').value = data.story || "";
         // document.getElementById('editWordDistractors').value = data.custom_distractors || ""; // Removed
         document.getElementById('editWordImage').value = data.image_url || '';
@@ -1616,6 +1677,14 @@
         e.preventDefault();
         const form = e.target;
         const formData = new FormData(form);
+
+        // Collect all meaning fields and combine them
+        const meaningInputs = document.querySelectorAll('.meaning-input');
+        if (meaningInputs.length > 0) {
+            const combinedMeanings = Array.from(meaningInputs).map(input => input.value.trim()).join(', ');
+            formData.set('chinese', combinedMeanings);
+        }
+
         const action = form.action;
 
         try {
