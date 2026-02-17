@@ -652,7 +652,7 @@ async def update_vocab(
     word: str = Form(...), 
     chinese: str = Form(...), 
     story: str = Form(...), 
-    image: str = Form(""), 
+    image: str = Form(None), 
     group: str = Form("Common"), 
     stage: str = Form("Unassigned"),
     course_id: int = Form(...),
@@ -677,8 +677,19 @@ async def update_vocab(
     vocab.display_order = display_order
     # vocab.custom_distractors = distractors # Managed separately now
     
-    if image:
-        vocab.image_url = image
+    # vocab.custom_distractors = distractors # Managed separately now
+    
+    print(f"DEBUG: update_vocab {vocab_id} - image='{image}' (type: {type(image)}), image_file={image_file}")
+    
+    if image is not None:
+        if image == "__DELETE__":
+            print("DEBUG: __DELETE__ marker received, clearing image_url")
+            vocab.image_url = ""
+        else:
+            print(f"DEBUG: Setting image_url to '{image}'")
+            vocab.image_url = image
+    else:
+        print("DEBUG: Image is None, skipping update")
         
     if image_file and image_file.filename:
         safe_filename = "".join(c for c in image_file.filename if c.isalnum() or c in "._- ")
@@ -1738,7 +1749,37 @@ async def clone_course(course_id: int, db: Session = Depends(get_db)):
         db.add(new_v)
     
     db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin?tab=content", status_code=303)
+
+
+@router.post("/reorder_words")
+async def reorder_words(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Batch update display_order for vocabulary words after drag-and-drop.
+    Expects JSON: {"vocab_ids": [id1, id2, id3, ...]} in new order
+    """
+    try:
+        data = await request.json()
+        vocab_ids = data.get("vocab_ids", [])
+        
+        if not vocab_ids:
+            return {"status": "error", "message": "No vocab IDs provided"}
+        
+        # Update display_order for each vocabulary in the new order
+        for index, vocab_id in enumerate(vocab_ids):
+            vocab = db.query(Vocabulary).filter(Vocabulary.id == vocab_id).first()
+            if vocab:
+                vocab.display_order = index
+        
+        db.commit()
+        return {"status": "success", "message": "Order updated"}
+    
+    except Exception as e:
+        db.rollback()
+        return {"status": "error", "message": str(e)}
 
 @router.post("/clone_stage_content")
 async def clone_stage_content(

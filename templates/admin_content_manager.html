@@ -86,6 +86,33 @@
         opacity: 0.5;
     }
 
+    /* Drag-and-drop styles */
+    .explorer-item[draggable="true"] {
+        cursor: move;
+    }
+
+    .explorer-item.dragging {
+        opacity: 0.4;
+    }
+
+    .explorer-item.drag-over-top {
+        border-top: 3px solid #0d6efd;
+    }
+
+    .explorer-item.drag-over-bottom {
+        border-bottom: 3px solid #0d6efd;
+    }
+
+    .explorer-item.drag-over-left {
+        border-left: 3px solid #0d6efd;
+    }
+
+    .explorer-item.drag-over-right {
+        border-right: 3px solid #0d6efd;
+    }
+
+
+
     .item-icon {
         font-size: 2.5rem;
         margin-bottom: 0.25rem;
@@ -286,15 +313,19 @@
 
                     <div class="mb-2">
                         <label class="form-label small">Word</label>
-                        <input type="text" name="word" class="form-control" required>
+                        <input type="text" name="word" id="addWordWord" class="form-control" required>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label small">Meaning (Chinese)</label>
-                        <input type="text" name="chinese" class="form-control" required>
+                        <label class="form-label small">Meaning(s)</label>
+                        <small class="text-muted d-block mb-1">Separate meanings with comma if you have multiple
+                            words</small>
+                        <div id="addMeaningsContainer">
+                            <input type="text" name="chinese" class="form-control" required>
+                        </div>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label small">Story</label>
-                        <textarea name="story" class="form-control" rows="3" required></textarea>
+                        <label class="form-label small">Story (Optional)</label>
+                        <textarea name="story" class="form-control" rows="3"></textarea>
                     </div>
 
                     <div class="mb-2">
@@ -347,8 +378,8 @@
                         </div>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label small">Story</label>
-                        <textarea name="story" id="editWordStory" class="form-control" rows="3" required></textarea>
+                        <label class="form-label small">Story (Optional)</label>
+                        <textarea name="story" id="editWordStory" class="form-control" rows="3"></textarea>
                     </div>
 
                     <div class="mb-2">
@@ -1122,6 +1153,59 @@
                 cm.show(e.pageX, e.pageY);
             };
 
+            // Add drag-and-drop for vocabulary files (not folders)
+            if (item.type !== 'folder') {
+                div.draggable = true;
+
+                div.ondragstart = (e) => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', key);
+                    div.classList.add('dragging');
+                };
+
+                div.ondragend = (e) => {
+                    div.classList.remove('dragging');
+                };
+
+                div.ondragover = (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+
+                    // Visual feedback - horizontal (left/right)
+                    const draggingElement = document.querySelector('.dragging');
+                    if (draggingElement && draggingElement !== div) {
+                        const rect = div.getBoundingClientRect();
+                        const midpoint = rect.left + rect.width / 2;
+
+                        if (e.clientX < midpoint) {
+                            div.classList.add('drag-over-left');
+                            div.classList.remove('drag-over-right');
+                        } else {
+                            div.classList.add('drag-over-right');
+                            div.classList.remove('drag-over-left');
+                        }
+                    }
+                };
+
+                div.ondragleave = (e) => {
+                    div.classList.remove('drag-over-left', 'drag-over-right');
+                };
+
+                div.ondrop = async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    div.classList.remove('drag-over-left', 'drag-over-right');
+
+                    const draggedKey = e.dataTransfer.getData('text/plain');
+                    if (draggedKey === key) return; // Same item
+
+                    // Reorder logic - horizontal positioning
+                    const rect = div.getBoundingClientRect();
+                    const insertBefore = e.clientX < (rect.left + rect.width / 2);
+                    await handleVocabReorder(draggedKey, key, insertBefore);
+                };
+            }
+
             view.appendChild(div);
         });
     }
@@ -1312,16 +1396,19 @@
     }
 
     // Update meaning fields based on number of words
-    function updateMeaningFields(wordString, meaningString) {
+    function updateMeaningFields(wordString, meaningString, containerSelector) {
+        containerSelector = containerSelector || '#meaningsContainer'; // Default to edit modal
         const words = wordString.split(',').map(w => w.trim()).filter(w => w);
         const meanings = meaningString.split(',').map(m => m.trim());
 
-        const container = document.getElementById('meaningsContainer');
+        const container = document.querySelector(containerSelector);
+        if (!container) return;
+
         container.innerHTML = '';
 
         if (words.length === 0) {
             // Fallback to single field
-            container.innerHTML = '<input type="text" name="chinese" id="editWordChinese" class="form-control" required>';
+            container.innerHTML = '<input type="text" name="chinese" class="form-control" required>';
             return;
         }
 
@@ -1348,20 +1435,131 @@
         });
     }
 
-    // Add event listener to word field for dynamic meaning field generation
+    // Add event listener to word fields for dynamic meaning field generation
     document.addEventListener('DOMContentLoaded', function () {
-        const editWordField = document.getElementById('editWordWord');
-        if (editWordField) {
-            editWordField.addEventListener('input', function () {
-                const currentMeanings = collectCurrentMeanings();
-                updateMeaningFields(this.value, currentMeanings);
-            });
+        console.log('=== DOMContentLoaded - Setting up event listeners ===');
+
+        try {
+            // Add Word Modal - Live Meaning Fields
+            const addWordInput = document.getElementById('addWordWord');
+            if (addWordInput) {
+                console.log('✓ Found addWordWord');
+                addWordInput.addEventListener('input', (e) => {
+                    const currentMeanings = collectCurrentMeanings('#addMeaningsContainer');
+                    updateMeaningFields(e.target.value, currentMeanings, '#addMeaningsContainer');
+                });
+            } else {
+                console.error('✗ addWordWord not found');
+            }
+
+            // Edit Word Modal - Live Meaning Fields
+            const editWordInput = document.getElementById('editWordWord');
+            if (editWordInput) {
+                console.log('✓ Found editWordWord');
+                editWordInput.addEventListener('input', (e) => {
+                    const currentMeanings = collectCurrentMeanings('#meaningsContainer');
+                    updateMeaningFields(e.target.value, currentMeanings, '#meaningsContainer');
+                });
+            } else {
+                console.error('✗ editWordWord not found');
+            }
+
+            // Edit Word Modal - Live Image Preview
+            const editImageInput = document.getElementById('editWordImage');
+            const imgPreview = document.getElementById('editWordImagePreview');
+
+            if (editImageInput && imgPreview) {
+                console.log('✓ Found editWordImage and preview');
+                console.log('Preview element:', imgPreview);
+                console.log('Preview initial display:', imgPreview.style.display);
+                console.log('Preview computed style:', window.getComputedStyle(imgPreview).display);
+
+                editImageInput.addEventListener('input', (e) => {
+                    console.log('Image input changed:', e.target.value);
+                    const imageUrl = e.target.value.trim();
+                    const warningMsg = document.getElementById('imageUrlWarning');
+
+                    // Smart check for common hosting page URLs instead of direct links
+                    if (imageUrl.includes('ibb.co') && !imageUrl.includes('i.ibb.co')) {
+                        if (!warningMsg) {
+                            const div = document.createElement('div');
+                            div.id = 'imageUrlWarning';
+                            div.className = 'alert alert-warning mt-2 small py-1';
+                            div.innerHTML = '<i class="bi bi-exclamation-triangle"></i> This looks like a <b>page URL</b>. Right-click the image on that page and choose "Copy Image Address" to get the direct link (should start with <b>i.ibb.co</b>).';
+                            imgPreview.parentNode.appendChild(div);
+                        }
+                    } else if (warningMsg) {
+                        warningMsg.remove();
+                    }
+
+                    if (imageUrl) {
+                        imgPreview.src = imageUrl;
+                        imgPreview.style.display = 'block';
+                        console.log('Set preview display to block');
+                        console.log('Preview src set to:', imgPreview.src);
+                        console.log('Preview getAttribute src:', imgPreview.getAttribute('src'));
+                        console.log('Preview computed display after:', window.getComputedStyle(imgPreview).display);
+                        console.log('Preview visibility:', window.getComputedStyle(imgPreview).visibility);
+                        console.log('Preview opacity:', window.getComputedStyle(imgPreview).opacity);
+                        console.log('Preview width:', imgPreview.offsetWidth);
+                        console.log('Preview height:', imgPreview.offsetHeight);
+                        console.log('Preview naturalWidth:', imgPreview.naturalWidth);
+                        console.log('Preview naturalHeight:', imgPreview.naturalHeight);
+
+                        // Check if element is in viewport
+                        const rect = imgPreview.getBoundingClientRect();
+                        console.log('Preview position:', rect);
+
+                        // Handle broken images
+                        imgPreview.onerror = () => {
+                            console.log('Image failed to load');
+                            imgPreview.style.display = 'none';
+                        };
+
+                        imgPreview.onload = () => {
+                            console.log('Image loaded successfully!');
+                            console.log('Loaded image size:', imgPreview.naturalWidth, 'x', imgPreview.naturalHeight);
+                        };
+                    } else {
+                        imgPreview.src = '';
+                        imgPreview.style.display = 'none';
+                    }
+                });
+            } else {
+                console.error('✗ editWordImage or preview not found');
+            }
+
+            // Edit Word Modal - File Upload Preview
+            const editFileInput = document.querySelector('#editWordModal input[name="image_file"]');
+            if (editFileInput && imgPreview) {
+                console.log('✓ Found image_file input');
+                editFileInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file && file.type.startsWith('image/')) {
+                        console.log('File selected:', file.name);
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            imgPreview.src = event.target.result;
+                            imgPreview.style.display = 'block';
+                            console.log('File preview loaded');
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+            }
+
+            console.log('=== Event listeners setup complete ===');
+        } catch (error) {
+            console.error('Error setting up event listeners:', error);
         }
     });
 
     // Collect current meanings from all input fields
-    function collectCurrentMeanings() {
-        const inputs = document.querySelectorAll('.meaning-input');
+    function collectCurrentMeanings(containerSelector) {
+        containerSelector = containerSelector || '#meaningsContainer'; // Default to edit modal
+        const container = document.querySelector(containerSelector);
+        if (!container) return '';
+        const inputs = container.querySelectorAll('.meaning-input');
         return Array.from(inputs).map(input => input.value).join(', ');
     }
 
@@ -1370,16 +1568,23 @@
         document.getElementById('editWordWord').value = data.word;
 
         // Generate meaning fields based on word count
-        updateMeaningFields(data.word, data.chinese_meaning || "");
+        updateMeaningFields(data.word, data.chinese_meaning || "", '#meaningsContainer');
 
         document.getElementById('editWordStory').value = data.story || "";
         // document.getElementById('editWordDistractors').value = data.custom_distractors || ""; // Removed
-        document.getElementById('editWordImage').value = data.image_url || '';
 
+        // Set image URL and update preview
+        const imageInput = document.getElementById('editWordImage');
         const imgPreview = document.getElementById('editWordImagePreview');
+        imageInput.value = data.image_url || '';
+
+        // Manually update preview since programmatic value change doesn't trigger 'input' event
         if (data.image_url) {
             imgPreview.src = data.image_url;
             imgPreview.style.display = 'block';
+            imgPreview.onerror = () => {
+                imgPreview.style.display = 'none';
+            };
         } else {
             imgPreview.src = '';
             imgPreview.style.display = 'none';
@@ -1657,6 +1862,16 @@
         const form = e.target;
         const formData = new FormData(form);
 
+        // Collect all meaning fields and combine them (same as edit modal)
+        const container = document.querySelector('#addMeaningsContainer');
+        if (container) {
+            const meaningInputs = container.querySelectorAll('.meaning-input');
+            if (meaningInputs.length > 0) {
+                const combinedMeanings = Array.from(meaningInputs).map(input => input.value.trim()).join(', ');
+                formData.set('chinese', combinedMeanings);
+            }
+        }
+
         try {
             const resp = await fetch(form.action, {
                 method: 'POST',
@@ -1685,6 +1900,21 @@
             formData.set('chinese', combinedMeanings);
         }
 
+        // Debug: Log form data
+        console.log('=== Form Submission Debug ===');
+        for (let [key, value] of formData.entries()) {
+            console.log(`${key}:`, value);
+        }
+
+        // Ensure empty image field is sent as empty string (not omitted)
+        // Ensure empty image field is sent as explicit delete marker
+        const imageInput = document.getElementById('editWordImage');
+        // If the input exists and is empty (user cleared it), send special marker
+        if (imageInput && !imageInput.value.trim()) {
+            formData.set('image', '__DELETE__');
+            console.log('Sending __DELETE__ marker for image');
+        }
+
         const action = form.action;
 
         try {
@@ -1701,9 +1931,91 @@
             console.error(err);
             alert("Error submitting form");
         }
-
     }
 
+
+
+    // Handle vocabulary reordering via drag-and-drop
+    async function handleVocabReorder(draggedKey, targetKey, insertBefore) {
+        try {
+            // Extract vocab IDs from keys (format: "file:wordname:id")
+            const draggedId = parseInt(draggedKey.split(':')[2]);
+            const targetId = parseInt(targetKey.split(':')[2]);
+
+            if (!draggedId || !targetId) {
+                console.error('Invalid vocab IDs');
+                return;
+            }
+
+            // Get current list of vocabularies in view (should be same stage)
+            // Filter ALL_VOCAB by current path to get items in current view
+            const currentGroup = fs.currentPath[0] || null;
+            const currentStage = fs.currentPath[1] || null;
+
+            let currentItems = ALL_VOCAB.filter(v => {
+                if (!v || v.is_deleted) return false;
+                if (currentGroup && v.group !== currentGroup) return false;
+                if (currentStage && v.stage !== currentStage) return false;
+                if (!currentGroup && !currentStage) return false; // Must be in a group/stage
+                return true;
+            }).sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+
+            // Find dragged and target indices
+            const draggedIndex = currentItems.findIndex(item => item.id === draggedId);
+            const targetIndex = currentItems.findIndex(item => item.id === targetId);
+
+            if (draggedIndex === -1 || targetIndex === -1) {
+                console.error('Items not found in current view');
+                return;
+            }
+
+            // Reorder the array
+            const reorderedItems = [...currentItems];
+            const [draggedItem] = reorderedItems.splice(draggedIndex, 1);
+
+            // Calculate new insertion index
+            let newIndex = targetIndex;
+            if (draggedIndex < targetIndex && !insertBefore) {
+                // Dragging right and dropping after target
+                newIndex = targetIndex;
+            } else if (draggedIndex < targetIndex && insertBefore) {
+                // Dragging right and dropping before target
+                newIndex = targetIndex - 1;
+            } else if (draggedIndex > targetIndex && insertBefore) {
+                // Dragging left and dropping before target
+                newIndex = targetIndex;
+            } else {
+                // Dragging left and dropping after target
+                newIndex = targetIndex + 1;
+            }
+
+            reorderedItems.splice(newIndex, 0, draggedItem);
+
+            // Extract IDs in new order
+            const vocabIds = reorderedItems.map(item => item.id);
+
+            // Send to backend
+            const response = await fetch('/admin_api/reorder_words', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vocab_ids: vocabIds })
+            });
+
+            const result = await response.json();
+            if (result.status === 'success') {
+                // Reload view to show new order
+                reloadAndRestore();
+            } else {
+                alert('Failed to reorder: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error reordering vocabularies:', error);
+            console.error('Dragged key:', draggedKey);
+            console.error('Target key:', targetKey);
+            console.error('Insert before:', insertBefore);
+            alert('Error reordering words: ' + error.message);
+        }
+    }
 
     // Global Helper for Persistence
     function reloadAndRestore() {

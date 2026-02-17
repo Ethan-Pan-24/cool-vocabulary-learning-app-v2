@@ -58,7 +58,6 @@
         style="z-index: 10;">
         <div>
             <h3 class="mb-0">Learning: {{ current_stage_name }}</h3>
-            <small class="text-muted">{{ vocab_list|length }} Words in this stage</small>
         </div>
         <div>
             {% if is_completed %}
@@ -95,9 +94,10 @@
         {% for item in vocab_list %}
         <div class="card shadow mb-5 word-card">
             <!-- Top Section: Word & Audio -->
-            <div class="card-header bg-transparent border-bottom-0 pt-4 pb-0 text-center">
-                <h1 class="display-4 fw-bold text-primary mb-1">{{ item.word }}</h1>
-                <h3 class="text-secondary mb-3">{{ item.chinese_meaning }}</h3>
+            <div class="card-header bg-transparent border-bottom-0 pt-4 pb-0 text-center" data-word="{{ item.word }}"
+                data-meaning="{{ item.chinese_meaning }}">
+                <!-- Word and meaning will be dynamically inserted here -->
+                <div id="word-display-{{ loop.index }}" class="word-meanings-display mb-1"></div>
 
                 {% if item.audio_url %}
                 <div class="mx-auto mb-3" style="max-width: 200px;">
@@ -297,8 +297,40 @@
         });
     }
 
+    // Display word + meaning pairs on separate lines
+    function displayWordMeaningPairs() {
+        document.querySelectorAll('.word-meanings-display').forEach(container => {
+            const header = container.closest('.card-header');
+            const words = header.getAttribute('data-word').split(',').map(w => w.trim());
+            const meanings = header.getAttribute('data-meaning').split(',').map(m => m.trim());
+
+            container.innerHTML = '';
+
+            words.forEach((word, index) => {
+                const meaning = meanings[index] || meanings[0]; // Fallback to first meaning
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'word-meaning-line mb-2';
+
+                const wordSpan = document.createElement('span');
+                wordSpan.className = 'display-4 fw-bold text-primary me-3';
+                wordSpan.textContent = word;
+
+                const meaningSpan = document.createElement('span');
+                meaningSpan.className = 'h3 text-secondary';
+                meaningSpan.textContent = meaning;
+
+                lineDiv.appendChild(wordSpan);
+                lineDiv.appendChild(meaningSpan);
+                container.appendChild(lineDiv);
+            });
+        });
+    }
+
     // Run on page load
-    document.addEventListener('DOMContentLoaded', highlightWordsInStory);
+    document.addEventListener('DOMContentLoaded', function () {
+        displayWordMeaningPairs();
+        highlightWordsInStory();
+    });
 
 </script>
 {% endblock %}
