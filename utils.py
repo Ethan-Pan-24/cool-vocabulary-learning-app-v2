@@ -88,11 +88,18 @@ def extract_json(text):
         
         # Extract comment (Robust)
         # Match "comment": "..." OR 'comment': '...' OR key: "..."
+        # Handle potential newlines or escaped quotes inside the comment
         comm_match = re.search(r'["\']?comment["\']?\s*:\s*(["\'])(.*?)\1', text, re.S | re.IGNORECASE)
         if comm_match:
-            result["comment"] = comm_match.group(2).replace('\\"', '"')
+            result["comment"] = comm_match.group(2).replace('\\"', '"').replace('\n', ' ')
         else:
-            result["comment"] = "評分已由系統自動校正(無法讀取AI評語)。"
+            # Fallback: Try looking for the last text block if JSON failed
+            # Sometimes AI puts the comment at the end outside JSON
+            fallback_comment = re.search(r'(?:評語|Comment)[:：]\s*(.+)', text, re.I | re.S)
+            if fallback_comment:
+                 result["comment"] = fallback_comment.group(1).strip()[:100] + "..."
+            else:
+                 result["comment"] = "評分已由系統自動校正(無法讀取AI評語)。"
 
         if any(k in result for k in ["semantic_depth", "collocation", "grammar", "image_relevance"]):
             return result
@@ -141,9 +148,26 @@ def score_sentence_ai(word: str, sentence: str, story: str = "", chinese_meaning
     clean_sentence = re.sub(r'[^\w]', ' ', sentence.lower())
     words_in_sentence = clean_sentence.split()
     word_found = any(clean_word == w for w in words_in_sentence)
-    if not word_found:
-        word_found = clean_word in clean_sentence.replace(" ", "")
+    # --- HARD TRIVIAL ANSWER CHECK ---
+    # Detect if user just copy-pasted the word or wrote something extremely short containing the word
+    cleaned_s = sentence.strip().lower()
+    cleaned_w = word.strip().lower()
     
+    # 1. Exact match or trivial variants (e.g. "apple.", " apple ", "apple,")
+    # Remove all punctuation and whitespace to check for "pure word" cheating
+    s_clean_pure = re.sub(r'[^\w]', '', cleaned_s)
+    w_clean_pure = re.sub(r'[^\w]', '', cleaned_w)
+    
+    if s_clean_pure == w_clean_pure:
+         return {
+            "semantic_depth": 0, "collocation": 0, "grammar": 0, "image_relevance": 0,
+            "total_average": 0,
+            "comment": "請勿直接貼上單字（包含僅添加標點符號），請造出完整句子。"
+        }
+    
+    # 2. Extremely short sentences are allowed to proceed to AI for stricter but fair grading
+    # (Removed hard length check per user request)
+
     prompt_text = f"""
     擔任【極其嚴格】的英語考官。全程使用「繁體中文」評分。
     
@@ -153,16 +177,25 @@ def score_sentence_ai(word: str, sentence: str, story: str = "", chinese_meaning
     學生造句: {sentence}
 
     【評分量表: 0.0 ~ 5.0 (絕對嚴禁超過 5 分)】
-    - 5.0: Native-like, 完美且具深度。
-    - 3.0: 正確但平庸(簡單句)。
+    - 5.0: Native-like, 完美且具深度，且【必須】與圖片內容高度相關。
+    - 3.0: 正確但平庸(簡單句)，或與圖片關聯薄弱。
     - 1.0: 語法或語意有重大瑕疵。
-    - 0.0: 胡言亂語、未包含單字、或邏輯錯誤。
+    - 0.0: 胡言亂語、未包含單字、邏輯錯誤、或【直接貼上單字本身】。
 
-    【核心審核 (如有下列情況，給予基礎分以資鼓勵)】: 
-    1. 邏輯與搭配錯誤: 即使單字詞性誤用或語意不合邏輯，但若有基本主謂結構，請給予 0.5 - 1.0 分以資鼓勵。
-    2. 幻想物件 (關鍵): 如果造句中提到了「圖片中完全不存在」的具體物件，該物件相關的 Relevance 分數必須大幅扣分。不得憑空想像圖中沒有的東西。
-    3. 簡單敷衍: 像「He felt {word}.」這種極短句，最高總分不得超過 2.5。
-    4. 評語要求: 評語應針對學生的「實際造句」給予具體建議，禁止提及指令中出現的舉例內容。
+    【核心審核 (嚴格執行)】: 
+    1. 圖片關聯性 (Relevance): 
+       - AI 必須「看」這張圖片。如果造句描述的內容與圖片場景明顯不符（例如圖中有車，句中卻說在游泳），image_relevance 必須為 0 分。
+       - 如果圖片無法讀取，則假定情境為 {story}，若與情境無關也需扣分。
+       - 幻想物件: 如果造句中提到了「圖片中完全不存在」的具體物件，image_relevance 為 0 分。
+    
+    2. 抄襲與敷衍 (此項極為重要):
+       - 如果學生只是【複製貼上】單字本身，或【僅在單字後添加標點符號】（如 "{word}," 或 "{word}."），直接給予總分 0 分。
+       - 造句如 "This is {word}"、"{word} is good" 等無意義句子，直接給予總分 0 分。
+       - 短句限制: 像「He felt {word}.」這種極短句，總分不得超過 2.0。
+
+    3. 邏輯與搭配: 即使單字詞性誤用，但若有基本主謂結構，可給予 0.5 - 1.0 同情分；但若完全語法混亂，則為 0 分。
+    
+    4. 評語要求: 必須針對【圖片內容】與【造句】的落差給予具體建議。例如：「圖中並沒有看見大象，建議描述圖中的...」。
 
     請輸出 JSON (數值範圍 0-5)：
     {{

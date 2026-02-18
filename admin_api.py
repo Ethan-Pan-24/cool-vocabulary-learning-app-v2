@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Form, Request, HTTPException, UploadFile
 from typing import List, Optional
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
-from database import get_db, Vocabulary, User, QuizResult, Course, Enrollment, ImageInteraction
+from database import get_db, Vocabulary, User, QuizResult, Course, Enrollment, ImageInteraction, ImageRating, DeletedContainer
 from utils import score_sentence_ai, ADMIN_EMAILS
 from auth import get_current_user_req
 import io
@@ -153,6 +153,10 @@ async def restore_course(
     db.commit()
     return {"status": "success"}
 
+from database import get_db, Vocabulary, User, QuizResult, Course, Enrollment, ImageInteraction, ImageRating, DeletedContainer
+
+# ... (lines 6-155 kept as is) ...
+
 @router.post("/permanently_delete_course/{course_id}")
 async def permanently_delete_course(
     course_id: int, 
@@ -168,12 +172,14 @@ async def permanently_delete_course(
     
     # Cascade delete related data (simple approach for now, relying on DB cascades if set, or manual cleanup)
     # Generic cleanup:
-    db.query(Enrollment).filter(Enrollment.course_id == course_id).delete()
-    db.query(Vocabulary).filter(Vocabulary.course_id == course_id).delete()
-    db.query(QuizResult).filter(QuizResult.course_id == course_id).delete()
+    db.query(Enrollment).filter(Enrollment.course_id == course_id).delete(synchronize_session=False)
+    db.query(Vocabulary).filter(Vocabulary.course_id == course_id).delete(synchronize_session=False)
+    db.query(QuizResult).filter(QuizResult.course_id == course_id).delete(synchronize_session=False)
     # Delete image interactions/ratings if needed
-    db.query(ImageInteraction).filter(ImageInteraction.course_id == course_id).delete()
-    db.query(ImageRating).filter(ImageRating.course_id == course_id).delete()
+    db.query(ImageInteraction).filter(ImageInteraction.course_id == course_id).delete(synchronize_session=False)
+    db.query(ImageRating).filter(ImageRating.course_id == course_id).delete(synchronize_session=False)
+    # Delete trash items related to this course
+    db.query(DeletedContainer).filter(DeletedContainer.course_id == course_id).delete(synchronize_session=False)
     
     db.delete(course)
     db.commit()

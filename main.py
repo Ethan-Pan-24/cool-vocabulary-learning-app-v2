@@ -611,6 +611,7 @@ async def learn_page(course_id: int, request: Request, stage_index: int = 0, pre
         current_stage_name = "Full List"
         is_last_stage = True
         next_stage_index = -1
+        prev_stage_index = -1
         
         # 1. Determine Current Stage Info
         if stages:
@@ -626,6 +627,9 @@ async def learn_page(course_id: int, request: Request, stage_index: int = 0, pre
                 current_stage_name = str(current_stage)
             
             # Navigation
+            if stage_index > 0:
+                prev_stage_index = stage_index - 1
+            
             if stage_index < len(stages) - 1:
                 is_last_stage = False
                 next_stage_index = stage_index + 1
@@ -676,6 +680,7 @@ async def learn_page(course_id: int, request: Request, stage_index: int = 0, pre
             "stage_index": stage_index,
             "is_last_stage": is_last_stage,
             "next_stage_index": next_stage_index,
+            "prev_stage_index": prev_stage_index,
             "attempt_count": attempt_count,
             "preview_group": preview_group # Pass to template to persist links
         })

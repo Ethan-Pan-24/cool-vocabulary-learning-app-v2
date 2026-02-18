@@ -171,7 +171,7 @@
                                 <i class="bi bi-pencil-square"></i> Manage Content
                             </a>
                             <button class="btn btn-sm btn-outline-warning"
-                                onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }})'>
+                                onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }}, {{ course.quiz_time_limit }})'>
                                 <i class="bi bi-gear"></i>
                             </button>
                             <button class="btn btn-sm btn-outline-danger"
@@ -230,7 +230,7 @@
                                 <i class="bi bi-question-square"></i>
                             </a>
                             <button class="btn btn-sm btn-outline-warning"
-                                onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }})'>
+                                onclick='editCourseSettings({{ course.id }}, {{ course.name|tojson|safe }}, {{ course.description|tojson|safe }}, {{ course.hashtags|tojson|safe }}, {{ "true" if course.is_public else "false" }}, {{ course.quiz_time_limit }})'>
                                 <i class="bi bi-gear"></i>
                             </button>
                             <button class="btn btn-sm btn-outline-danger"
@@ -377,6 +377,12 @@
                         <textarea name="description" id="edit_description" class="form-control" rows="2"></textarea>
                     </div>
                     <div class="mb-3">
+                        <label class="form-label">Quiz Time Limit (minutes)</label>
+                        <input type="number" name="quiz_time_limit" id="edit_quiz_time_limit" class="form-control"
+                            min="0">
+                        <small class="text-muted">Set to 0 for unlimited time.</small>
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label">Hashtags</label>
                         <div class="d-flex flex-wrap gap-2 mb-2">
                             {% for tag in ['Gept', 'Toefl', 'Toeic', '學測'] %}
@@ -457,12 +463,13 @@
         document.getElementById('edit_hashtags_input').value = tags.join(',');
     }
 
-    function editCourseSettings(id, name, desc, tags, isPublic) {
+    function editCourseSettings(id, name, desc, tags, isPublic, timeLimit) {
         document.getElementById('editCourseForm').action = `/admin_api/update_course/${id}`;
         document.getElementById('edit_name').value = name;
         document.getElementById('edit_description').value = desc;
         // isPublic passed as boolean from template
         document.getElementById('edit_is_public').checked = isPublic;
+        document.getElementById('edit_quiz_time_limit').value = timeLimit !== undefined ? timeLimit : 5;
 
         // Ensure redirect points to community tab
         document.querySelector('#editCourseForm input[name="redirect_to"]').value = "/courses#community";

@@ -5,7 +5,58 @@
         position: relative;
         display: inline-block;
     }
+
+    /* Grading Overlay */
+    #gradingOverlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.85);
+        z-index: 9999;
+        display: none;
+        /* Hidden by default */
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .grading-spinner {
+        width: 60px;
+        height: 60px;
+        border: 5px solid #f3f3f3;
+        border-top: 5px solid #3498db;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 20px;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .grading-text {
+        font-size: 1.5rem;
+        font-weight: 300;
+        letter-spacing: 1px;
+    }
 </style>
+
+<!-- Full Screen Grading Overlay -->
+<div id="gradingOverlay">
+    <div class="grading-spinner"></div>
+    <div id="gradingStatus" class="grading-text">Submitting Quiz...</div>
+</div>
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div class="d-flex align-items-center">
         <h1>Quiz Phase</h1>
@@ -197,60 +248,158 @@
     // but we might want to reset if they start a new session? 
     // Let's assume manual reset isn't needed for this simple flow.
 
-    // --- TIMER LOGIC ---
-    const quizTimeLimit = {{ quiz_time_limit | default (5) }};
-    let timeLeft = quizTimeLimit * 60;
-    let elapsedSeconds = 0;  // Track actual time spent
-    const timerDisplay = document.getElementById('timer');
+    // Global timer variable (Accumulated valid time)
+    window.quizElapsedSeconds = 0;
 
-    // Start tracking elapsed time immediately
-    const elapsedTimer = setInterval(() => {
-        elapsedSeconds++;
+    // Robust Tracking Variables
+    let startTime = Date.now();
+    let isVisible = true;
+
+    // Visibility Change Handler
+    document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === 'visible') {
+            isVisible = true;
+            startTime = Date.now(); // Resume tracking
+            console.log("Quiz Resumed. Start:", startTime);
+        } else {
+            isVisible = false;
+            // Add the chunk of time spent before hiding
+            const now = Date.now();
+            const delta = Math.floor((now - startTime) / 1000);
+            if (delta > 0) {
+                window.quizElapsedSeconds += delta;
+            }
+            console.log("Quiz Paused. Added:", delta, "Total:", window.quizElapsedSeconds);
+        }
+    });
+
+    document.addEventListener("DOMContentLoaded", function () {
+        // --- TIMER LOGIC ---
+        const quizTimeLimit = {{ quiz_time_limit | default (5)
+    }};
+    let timeLeft = quizTimeLimit * 60;
+    const timerDisplay = document.getElementById('timer');
+    const quizForm = document.getElementById('quiz-form');
+
+    // Display Update Loop (Visual Only - syncs every second)
+    setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            // Calculate potential total if we stopped right now
+            const currentSession = Math.floor((Date.now() - startTime) / 1000);
+            const totalDisplay = window.quizElapsedSeconds + currentSession;
+            // console.log("Current Display Time:", totalDisplay);
+        }
     }, 1000);
 
     if (quizTimeLimit > 0) {
+        // Initial display
+        updateTimerDisplay(timeLeft);
+
         const countdown = setInterval(() => {
-            const minutes = Math.floor(timeLeft / 60);
-            const seconds = timeLeft % 60;
-            timerDisplay.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+            timeLeft--;
+            updateTimerDisplay(timeLeft);
 
             if (timeLeft <= 0) {
                 clearInterval(countdown);
-                clearInterval(elapsedTimer);
                 alert("Time is up! Submitting your quiz.");
-                document.getElementById('quiz-form').submit();
+                quizForm.submit();
             }
-            timeLeft--;
         }, 1000);
+
+        // Expose timers to be cleared on submit
+        window.quizTimers = { countdown };
+    } else {
+        window.quizTimers = {};
     }
+
+    // Expose elapsedSeconds for submission handler
+    window.getElapsedSeconds = () => elapsedSeconds;
+
+    function updateTimerDisplay(secondsLeft) {
+        const minutes = Math.floor(secondsLeft / 60);
+        const seconds = secondsLeft % 60;
+        if (timerDisplay) timerDisplay.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    }
+    });
 
     // Prevent double submission & Inject Quiz Time
     document.getElementById('quiz-form').onsubmit = function () {
-        const btn = this.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        btn.textContent = "Submitting...";
+        const form = this;
+        const btn = form.querySelector('button[type="submit"]');
+
+        // 1. Show Overlay
+        const overlay = document.getElementById('gradingOverlay');
+        const statusText = document.getElementById('gradingStatus');
+        if (overlay) overlay.style.display = 'flex';
+
+        // 2. Disable interaction (Visual only, to ensure data is sent)
+        const allInputs = form.querySelectorAll('input, select, textarea, button');
+        allInputs.forEach(input => {
+            // DO NOT set disabled=true, otherwise data won't be sent!
+            if (input.type !== 'hidden') {
+                input.setAttribute('readonly', 'readonly'); // For text inputs
+                input.style.pointerEvents = 'none'; // Prevent clicks for selects/radios
+                input.style.opacity = '0.6'; // Visual cue
+            }
+            if (input.tagName === 'BUTTON') {
+                input.disabled = true; // Buttons can be disabled safely
+            }
+        });
+
+        // 3. Dynamic Status Updates
+        const messages = [
+            "Uploading answers...",
+            "Analyzing performance...",
+            "Calculating score...",
+            "Generating feedback...",
+            "Almost there..."
+        ];
+        let msgIdx = 0;
+
+        // Change message every 1.5 seconds
+        setInterval(() => {
+            if (msgIdx < messages.length) {
+                if (statusText) statusText.textContent = messages[msgIdx];
+                msgIdx++;
+            }
+        }, 1500);
 
         // Stop tracking elapsed time
-        clearInterval(elapsedTimer);
+        // Timestamp logic doesn't need interval clearing, just final calculation.
 
         // Inject Quiz Duration (use actual elapsed time)
         try {
+            // Finalize Time Calculation (Add pending active session)
+            if (document.visibilityState === 'visible') {
+                const now = Date.now();
+                const delta = Math.floor((now - startTime) / 1000);
+                if (delta > 0) window.quizElapsedSeconds += delta;
+            }
+
             let st = JSON.parse(document.getElementById('stageTimingInput').value || "{}");
-            st["Quiz"] = elapsedSeconds;  // Use elapsed time, not remaining time
+            // Use the global variable
+            st["Quiz"] = window.quizElapsedSeconds || 0;
+            console.log("FINAL SUBMISSION TIME:", st["Quiz"]);
+
             document.getElementById('stageTimingInput').value = JSON.stringify(st);
 
-            // 1. Clear LocalStorage immediately before submission to prevent accumulation in next attempt
+            // Clear LocalStorage
             localStorage.removeItem(storageKey);
             localStorage.removeItem(stageStorageKey);
             console.log("LocalStorage cleared for course:", {{ course_id }});
     } catch (e) { console.error(e); }
+
+    // Form submits naturally
+    return true;
     };
 
     // --- DYNAMIC QUIZ RENDERER ---
-    const rawConfig = '{{ quiz_config | safe }}';
+    // --- DYNAMIC QUIZ RENDERER ---
+    const rawConfig = {{ quiz_config | tojson | safe }};
     let QUIZ_DATA = [];
     try {
-        QUIZ_DATA = JSON.parse(rawConfig || '[]');
+        // If it's already an object, use it. If string, parse it.
+        QUIZ_DATA = (typeof rawConfig === 'string') ? JSON.parse(rawConfig || '[]') : rawConfig;
     } catch (e) { console.error("Invalid Quiz Config", e); }
 
     if (QUIZ_DATA.length > 0) {

@@ -147,6 +147,13 @@
 
     <!-- Navigation Footer -->
     <div class="d-grid gap-2 mb-5 pb-5">
+        {% if prev_stage_index >= 0 %}
+        <button class="btn btn-outline-secondary btn-lg p-3 mb-2"
+            onclick="saveAndProceed('/learn/{{ course_id }}?stage_index={{ prev_stage_index }}{% if preview_group %}&preview_group={{ preview_group }}{% endif %}')">
+            <i class="bi bi-arrow-left"></i> Previous Stage
+        </button>
+        {% endif %}
+
         {% if not is_last_stage %}
         <button class="btn btn-primary btn-lg p-3"
             onclick="saveAndProceed('/learn/{{ course_id }}?stage_index={{ next_stage_index }}{% if preview_group %}&preview_group={{ preview_group }}{% endif %}')">
@@ -330,6 +337,17 @@
     document.addEventListener('DOMContentLoaded', function () {
         displayWordMeaningPairs();
         highlightWordsInStory();
+
+        // --- SESSION RESET LOGIC ---
+        // If user comes from outside the learning flow (e.g. from Course List /courses), reset timers.
+        // We check if referrer does NOT contain '/learn/' and NOT '/quiz/'.
+        // This allows Refresh and Back/Next navigation to keep time, but a fresh entry clears it.
+        const referrer = document.referrer;
+        if (!referrer.includes('/learn/') && !referrer.includes('/quiz/')) {
+            console.log("New session detected. Resetting learning timers.");
+            localStorage.removeItem(stageStorageKey);
+            localStorage.removeItem(totalStorageKey);
+        }
     });
 
 </script>

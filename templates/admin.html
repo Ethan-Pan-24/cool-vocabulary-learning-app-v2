@@ -50,7 +50,7 @@
             <div class="col-md-5">
                 <div class="card p-4 shadow-sm mb-4">
                     <h4>Create New Course</h4>
-                    <form action="/admin_api/create_course" method="post">
+                    <form action="/admin_api/create_course" method="post" onsubmit="saveStateBeforeReload()">
                         <div class="mb-3">
                             <input type="text" name="name" class="form-control"
                                 placeholder="Course Name (e.g. English 101)" required>
@@ -99,7 +99,8 @@
                                         data-description="{{ c.description or '' }}"
                                         data-groups="{{ c.group_names or '' }}"
                                         data-time="{{ c.quiz_time_limit if c.quiz_time_limit is not none else 5 }}"
-                                        title="Edit Name/Time">
+                                        data-is-public="{{ 'true' if c.is_public else 'false' }}"
+                                        title="Edit Name/Time/Privacy">
                                         <i class="bi bi-pencil-square"></i> Edit
                                     </button>
                                     <button class="btn btn-sm btn-outline-secondary me-1"
@@ -150,6 +151,37 @@
             <div id="plots" class="row"></div>
         </div>
     </div>
+
+    <!-- ... (Other tabs) ... -->
+
+    <!-- Persistence Logic -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            // Restore Tab
+            const activeTab = sessionStorage.getItem('adminActiveTab');
+            if (activeTab) {
+                const tabBtn = document.querySelector(`button[data-bs-target="${activeTab}"]`);
+                if (tabBtn) new bootstrap.Tab(tabBtn).show();
+            }
+            // Restore Scroll
+            const scrollPos = sessionStorage.getItem('adminScrollPos');
+            if (scrollPos) window.scrollTo(0, parseInt(scrollPos));
+
+            // Clear after use (optional, or keep for refresh)
+            sessionStorage.removeItem('adminScrollPos');
+            // We keep tab to persist across refreshes
+        });
+
+        function saveStateBeforeReload() {
+            // Save active tab
+            const activeTabPane = document.querySelector('.tab-pane.active');
+            if (activeTabPane) sessionStorage.setItem('adminActiveTab', '#' + activeTabPane.id);
+
+            // Save scroll
+            sessionStorage.setItem('adminScrollPos', window.scrollY);
+        }
+    </script>
+
 
     <!-- IMAGE ANALYTICS TAB -->
     <div class="tab-pane fade" id="imageAnalytics" role="tabpanel">
@@ -533,6 +565,9 @@
         document.getElementById('editCourseDescription').value = btn.dataset.description;
         document.getElementById('editCourseGroups').value = btn.dataset.groups;
         document.getElementById('editCourseTime').value = btn.dataset.time;
+        // Handle is_public
+        const isPublic = btn.dataset.isPublic === 'true';
+        document.getElementById('editCoursePublic').checked = isPublic;
 
         new bootstrap.Modal(document.getElementById('editCourseModal')).show();
     }
@@ -1104,7 +1139,7 @@
                 <h5 class="modal-title"><i class="bi bi-pencil-square"></i> Edit Course Settings</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form id="editCourseFormModal" method="post">
+            <form id="editCourseFormModal" method="post" onsubmit="saveStateBeforeReload()">
                 <input type="hidden" name="redirect_to" value="/admin">
                 <div class="modal-body">
                     <div class="mb-3">
@@ -1122,9 +1157,16 @@
                             <input type="text" name="groups" id="editCourseGroups" class="form-control">
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label class="form-label">Quiz Time (min)</label>
+                            <label class="form-label">Quiz Time Limit (minutes)</label>
                             <input type="number" name="quiz_time_limit" id="editCourseTime" class="form-control"
                                 min="0">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_public" value="true"
+                                id="editCoursePublic">
+                            <label class="form-check-label" for="editCoursePublic">Public (Visible to everyone)</label>
                         </div>
                     </div>
                     <p class="small text-muted mb-0">Note: Setting Quiz Time to 0 means no time limit.</p>
