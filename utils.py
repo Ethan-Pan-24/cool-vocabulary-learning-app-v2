@@ -165,7 +165,34 @@ def score_sentence_ai(word: str, sentence: str, story: str = "", chinese_meaning
             "comment": "請勿直接貼上單字（包含僅添加標點符號），請造出完整句子。"
         }
     
-    # 2. Extremely short sentences are allowed to proceed to AI for stricter but fair grading
+    # 2. Hard check for universal placeholder patterns
+    # (e.g., "I don't know what {word} means", "What is {word}?", "How to use {word}?")
+    placeholder_patterns = [
+        r"i (don't|do not|don't really) know",
+        r"i (cannot|can't|am unable to) (make|write|use|create|do)",
+        r"(what|how) (is|does|to|means|meaning) " + re.escape(cleaned_w),
+        r"meaning of (" + re.escape(cleaned_w) + r"|this word|the word)",
+        r"definition of (" + re.escape(cleaned_w) + r"|this word|the word)",
+        r"how to (use|make|write|say) " + re.escape(cleaned_w),
+        r"tell me (about|the|how|what) " + re.escape(cleaned_w),
+        r"give me a sentence",
+        r"can you (figure out|tell me|show me|help me|explain)",
+        r"do you (know|understand|have)",
+        r"i (don't|do not|don't really) understand",
+        r"is (a|the) (hard|difficult|new|word)",
+        r"usage (of|for) " + re.escape(cleaned_w),
+        r"please (tell|show|give|help|describe|explain)"
+    ]
+    
+    for pattern in placeholder_patterns:
+        if re.search(pattern, cleaned_s):
+            return {
+                "semantic_depth": 0, "collocation": 0, "grammar": 0, "image_relevance": 0,
+                "total_average": 0,
+                "comment": "系統偵測到套版句型（如：我不知道...、...是什麼意思）。請嘗試使用單字造出具實質語意的完整句子，而非詢問用法。"
+            }
+
+    # 3. Extremely short sentences are allowed to proceed to AI for stricter but fair grading
     # (Removed hard length check per user request)
 
     prompt_text = f"""
@@ -191,6 +218,7 @@ def score_sentence_ai(word: str, sentence: str, story: str = "", chinese_meaning
     2. 抄襲與敷衍 (此項極為重要):
        - 如果學生只是【複製貼上】單字本身，或【僅在單字後添加標點符號】（如 "{word}," 或 "{word}."），直接給予總分 0 分。
        - 造句如 "This is {word}"、"{word} is good" 等無意義句子，直接給予總分 0 分。
+       - 【萬用套版句】: 凡是類似 "I don't know what {word} means"、"What is {word}?"、"Do you know how to use {word}?"、"Can you tell me the meaning of {word}?" 等表達不認識單字或詢問用法、意義的句子，一律視為敷衍，直接給予總分 0 分。
        - 短句限制: 像「He felt {word}.」這種極短句，總分不得超過 2.0。
 
     3. 邏輯與搭配: 即使單字詞性誤用，但若有基本主謂結構，可給予 0.5 - 1.0 同情分；但若完全語法混亂，則為 0 分。

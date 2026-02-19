@@ -111,12 +111,13 @@ async def course_analytics(
         except:
             nasa_data = None
     
-    # 獲取課程的所有圖片（用於評分）
+    # 獲取課程的組別特定圖片（用於評分）
     vocab_list = db.query(Vocabulary).filter(
         Vocabulary.course_id == course_id,
         Vocabulary.is_deleted == False,
         Vocabulary.image_url != None,
-        Vocabulary.image_url != ""
+        Vocabulary.image_url != "",
+        or_(Vocabulary.group == enrollment.group, Vocabulary.group == 'Common')
     ).all()
     # Determine Section Headers from Quiz Config
     section_headers = ["Translation", "Sentence"] # Default Legacy
@@ -236,10 +237,11 @@ async def get_course_images(
     if not enrollment and not user.is_admin:
         raise HTTPException(status_code=403, detail="無權訪問")
     
-    # 獲取課程詞彙及其圖片
+    # 獲取課程詞彙及其圖片 (僅限該組別看到的)
     vocab_list = db.query(Vocabulary).filter(
         Vocabulary.course_id == course_id,
-        Vocabulary.is_deleted == False
+        Vocabulary.is_deleted == False,
+        or_(Vocabulary.group == enrollment.group, Vocabulary.group == 'Common')
     ).all()
     
     # De-duplicate by word: keep latest ID

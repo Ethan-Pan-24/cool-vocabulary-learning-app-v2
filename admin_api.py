@@ -3038,3 +3038,103 @@ async def permanent_delete_container(
     db.commit()
     
     return {"status": "success", "msg": f"{container.type.capitalize()} permanently deleted"}
+
+@router.post("/create_mirror_course/{course_id}")
+async def create_mirror_course(
+    course_id: int,
+    user: User = Depends(get_current_user_req),
+    db: Session = Depends(get_db)
+):
+    # 1. Permission Check
+    original_course = db.query(Course).filter(Course.id == course_id).first()
+    if not original_course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Allow admin or creator
+    if not user.is_admin and original_course.creator_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # 2. Extract Groups & Limit to 2 for Swapping
+    if not original_course.group_names:
+         raise HTTPException(status_code=400, detail="Original course has no groups defined.")
+         
+    groups = [g.strip() for g in original_course.group_names.split(",") if g.strip()]
+    if len(groups) < 2:
+        raise HTTPException(status_code=400, detail="Mirror feature requires at least 2 groups.")
+
+    # Cyclic Rotation Logic (A->B->C->A)
+    group_map = {}
+    n = len(groups)
+    for i in range(n):
+        current_g = groups[i]
+        next_g = groups[(i + 1) % n]
+        group_map[current_g] = next_g
+    
+    # 3. Create Mirror Course
+    new_course = Course(
+        name=f"{original_course.name} (Mirror)",
+        description=f"[Mirror of {original_course.name}] {original_course.description}",
+        group_names=original_course.group_names, # Keep structure same
+        stage_config=original_course.stage_config,
+        quiz_config=original_course.quiz_config,
+        quiz_time_limit=original_course.quiz_time_limit,
+        is_public=original_course.is_public, # Inherit from original
+        creator_id=user.id,
+        hashtags=original_course.hashtags
+    )
+    db.add(new_course)
+    db.flush() # Get ID
+    
+    # 4. Duplicate Vocabulary
+    original_vocabs = db.query(Vocabulary).filter(
+        Vocabulary.course_id == course_id,
+        Vocabulary.is_deleted == False
+    ).all()
+    
+    for v in original_vocabs:
+        new_vocab = Vocabulary(
+            course_id=new_course.id,
+            word=v.word,
+            story=v.story,
+            image_url=v.image_url,
+            audio_url=v.audio_url,
+            chinese_meaning=v.chinese_meaning,
+            group=v.group, # Keep content group same! (Students swap, content stays)
+            stage=v.stage,
+            is_image_enabled=v.is_image_enabled,
+            is_audio_enabled=v.is_audio_enabled,
+            display_order=v.display_order,
+            custom_distractors=v.custom_distractors
+        )
+        db.add(new_vocab)
+        
+    # 5. Mirror Enrollments (Swap Logic)
+    original_enrollments = db.query(Enrollment).filter(Enrollment.course_id == course_id).all()
+    
+    count_swapped = 0
+    for e in original_enrollments:
+        # Cyclic Swap Logic
+        new_group = group_map.get(e.group, e.group)
+        
+        # Check if already enrolled (unlikely for new course but safe)
+        exists = db.query(Enrollment).filter(
+            Enrollment.user_id == e.user_id,
+            Enrollment.course_id == new_course.id
+        ).first()
+        
+        if not exists:
+            new_enrollment = Enrollment(
+                user_id=e.user_id,
+                course_id=new_course.id,
+                group=new_group
+            )
+            db.add(new_enrollment)
+            count_swapped += 1
+
+    db.commit()
+    
+    return {
+        "status": "success", 
+        "message": f"Created mirror course '{new_course.name}' with {count_swapped} students rotated.",
+        "course_id": new_course.id
+    }

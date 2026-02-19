@@ -136,11 +136,11 @@
                 <label class="form-label fw-bold">1. 心智需求 (Mental Demand)</label>
                 <div class="small text-muted mb-2">
                     定義：指執行任務時需要多少心理與感知活動（例如：思考、決定、計算、記憶、看、搜尋等）。<br>
-                    <strong>評量重點：任務是簡單還是具有挑戰性？是單純還是複雜？是需要精確判斷還是容錯率高？</strong>
+                    <strong>評量重點：背單字的過程是簡單還是具有挑戰性？是單純還是複雜？是需要精確判斷還是容錯率高？</strong>
                 </div>
                 <div class="d-flex align-items-center">
                     <span class="me-2 text-muted small">低</span>
-                    <input type="range" class="form-range flex-grow-1" name="nasa_mental" min="0" max="100" step="5"
+                    <input type="range" class="form-range flex-grow-1" name="nasa_mental" min="0" max="100" step="1"
                         value="50" oninput="this.nextElementSibling.innerText = this.value">
                     <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
                     <span class="ms-2 text-muted small">高</span>
@@ -151,11 +151,11 @@
                 <label class="form-label fw-bold">2. 體力需求 (Physical Demand)</label>
                 <div class="small text-muted mb-2">
                     定義：指執行任務時需要多少肢體活動（例如：推、拉、轉動、控制、啟動等）。<br>
-                    <strong>評量重點：任務是輕鬆還是辛苦？步調是緩慢還是快速？是輕鬆舒緩的還是費力勞累的？</strong>
+                    <strong>評量重點：背單字的過程是輕鬆還是辛苦？步調是緩慢還是快速？是輕鬆舒緩的還是費力勞累的？</strong>
                 </div>
                 <div class="d-flex align-items-center">
                     <span class="me-2 text-muted small">低</span>
-                    <input type="range" class="form-range flex-grow-1" name="nasa_physical" min="0" max="100" step="5"
+                    <input type="range" class="form-range flex-grow-1" name="nasa_physical" min="0" max="100" step="1"
                         value="50" oninput="this.nextElementSibling.innerText = this.value">
                     <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
                     <span class="ms-2 text-muted small">高</span>
@@ -166,11 +166,11 @@
                 <label class="form-label fw-bold">3. 時間需求 (Temporal Demand)</label>
                 <div class="small text-muted mb-2">
                     定義：指因為任務發生的頻率或步調，而讓操作者感受到的時間壓力。<br>
-                    <strong>評量重點：任務的步調是緩慢閒適的，還是快速且令人瘋狂（急速）的？</strong>
+                    <strong>評量重點：學習過程以及測驗中的步調是緩慢閒適的，還是快速且令人瘋狂（急速）的？</strong>
                 </div>
                 <div class="d-flex align-items-center">
                     <span class="me-2 text-muted small">低</span>
-                    <input type="range" class="form-range flex-grow-1" name="nasa_temporal" min="0" max="100" step="5"
+                    <input type="range" class="form-range flex-grow-1" name="nasa_temporal" min="0" max="100" step="1"
                         value="50" oninput="this.nextElementSibling.innerText = this.value">
                     <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
                     <span class="ms-2 text-muted small">高</span>
@@ -178,17 +178,17 @@
             </div>
 
             <div class="col-md-6 mb-4">
-                <label class="form-label fw-bold">4. 表現感受 (Performance)</label>
+                <label class="form-label fw-bold">4. 表現成效 (Performance)</label>
                 <div class="small text-muted mb-2">
                     定義：操作者對自己達成任務目標成功程度的自我評估。<br>
                     <strong>評量重點：你認為自己達成實驗(或自己)設定目標的成功率如何？你對自己的表現滿意嗎？</strong>
                 </div>
                 <div class="d-flex align-items-center">
-                    <span class="me-2 text-muted small">低</span>
+                    <span class="me-2 text-muted small">良好</span>
                     <input type="range" class="form-range flex-grow-1" name="nasa_performance" min="0" max="100"
-                        step="5" value="50" oninput="this.nextElementSibling.innerText = this.value">
+                        step="1" value="50" oninput="this.nextElementSibling.innerText = this.value">
                     <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
-                    <span class="ms-2 text-muted small">高</span>
+                    <span class="ms-2 text-muted small">不良</span>
                 </div>
             </div>
 
@@ -196,11 +196,11 @@
                 <label class="form-label fw-bold">5. 努力程度 (Effort)</label>
                 <div class="small text-muted mb-2">
                     定義：為了達到目前的表現水準，操作者必須投入多少心智與體力上的努力。<br>
-                    <strong>評量重點：無論最終結果如何，你為了完成這項任務感覺自己「工作得多辛苦」？</strong>
+                    <strong>評量重點：無論最終結果如何，你為了完成本次學習與測驗，感覺自己「工作得多辛苦」？</strong>
                 </div>
                 <div class="d-flex align-items-center">
                     <span class="me-2 text-muted small">低</span>
-                    <input type="range" class="form-range flex-grow-1" name="nasa_effort" min="0" max="100" step="5"
+                    <input type="range" class="form-range flex-grow-1" name="nasa_effort" min="0" max="100" step="1"
                         value="50" oninput="this.nextElementSibling.innerText = this.value">
                     <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
                     <span class="ms-2 text-muted small">高</span>
@@ -208,15 +208,15 @@
             </div>
 
             <div class="col-md-6 mb-4">
-                <label class="form-label fw-bold">6. 挫折程度 (Frustration Level)</label>
+                <label class="form-label fw-bold">6. 挫折水平 (Frustration Level)</label>
                 <div class="small text-muted mb-2">
                     定義：指在執行任務的過程中，操作者心理感受到的壓力和情緒狀態。<br>
-                    <strong>評量重點：你在任務中感到的是安全、滿足、放鬆，還是覺得不安、氣餒、惱火、壓力大且煩躁？</strong>
+                    <strong>評量重點：你在本次學習過程與測驗中感到的是安全、滿足、放鬆，還是覺得不安、氣餒、惱火、壓力大且煩躁？</strong>
                 </div>
                 <div class="d-flex align-items-center">
                     <span class="me-2 text-muted small">低</span>
                     <input type="range" class="form-range flex-grow-1" name="nasa_frustration" min="0" max="100"
-                        step="5" value="50" oninput="this.nextElementSibling.innerText = this.value">
+                        step="1" value="50" oninput="this.nextElementSibling.innerText = this.value">
                     <div class="ms-2 fw-bold" style="width: 30px; text-align: center;">50</div>
                     <span class="ms-2 text-muted small">高</span>
                 </div>

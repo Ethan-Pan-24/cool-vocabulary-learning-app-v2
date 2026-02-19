@@ -111,6 +111,11 @@
                                         onclick="confirmDeleteCourse({{ c.id }}, '{{ c.name }}')" title="Delete Course">
                                         <i class="bi bi-trash"></i> Delete
                                     </button>
+                                    <button class="btn btn-sm btn-outline-info"
+                                        onclick="createMirrorCourse({{ c.id }}, '{{ c.name }}')"
+                                        title="Create Mirror Course (Swap Groups)">
+                                        <i class="bi bi-arrow-left-right"></i> Mirror
+                                    </button>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -302,6 +307,30 @@
     function confirmDeleteCourse(id, name) {
         if (confirm(`Delete Course: "${name}"?`)) {
             deleteCourse(id);
+        }
+    }
+
+    async function createMirrorCourse(courseId, courseName) {
+        if (!confirm(`Are you sure you want to create a Mirror Course for "${courseName}"?\n\nThis will:\n1. Duplicate the course as "${courseName} (Mirror)"\n2. COPY all content\n3. SWAP student groups (A <-> B)\n\nAnalytics will be separate.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/admin_api/create_mirror_course/${courseId}`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                alert(result.message);
+                location.reload();
+            } else {
+                const err = await response.json();
+                alert("Error: " + (err.detail || "Failed to create mirror course"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Network error: " + error);
         }
     }
 

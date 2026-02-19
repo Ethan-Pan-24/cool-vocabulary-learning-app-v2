@@ -213,6 +213,38 @@ async def join_course(course_id: int, user: User = Depends(get_current_user_req)
         
         new_enrollment = Enrollment(user_id=user.id, course_id=course_id, group=assigned_group)
         db.add(new_enrollment)
+    
+        # 2b. Auto-Enroll in Mirror Course (if exists)
+        try:
+            mirror_name = f"{course.name} (Mirror)"
+            mirror_course = db.query(Course).filter(Course.name == mirror_name).first()
+            
+            if mirror_course and mirror_course.group_names:
+                # Check if already enrolled in mirror
+                mirror_exists = db.query(Enrollment).filter(
+                    Enrollment.user_id == user.id,
+                    Enrollment.course_id == mirror_course.id
+                ).first()
+                
+                if not mirror_exists:
+                    # Calculate Rotated Group
+                    groups = [g.strip() for g in course.group_names.split(",") if g.strip()]
+                    if assigned_group in groups:
+                        idx = groups.index(assigned_group)
+                        # Cyclic Rotation: Next group in list
+                        rotated_group = groups[(idx + 1) % len(groups)]
+                        
+                        mirror_enrollment = Enrollment(
+                            user_id=user.id,
+                            course_id=mirror_course.id,
+                            group=rotated_group
+                        )
+                        db.add(mirror_enrollment)
+                        print(f"Auto-enrolled user {user.id} in Mirror Course {mirror_course.id} (Group {rotated_group})")
+        except Exception as e:
+            print(f"Mirror Auto-Enroll Error: {e}")
+            # Non-critical, continue
+        
         db.commit()
         
         return RedirectResponse(url=f"/learn/{course_id}", status_code=303)
