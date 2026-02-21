@@ -147,7 +147,30 @@ def score_sentence_ai(word: str, sentence: str, story: str = "", chinese_meaning
     clean_word = re.sub(r'[^\w]', '', word.lower())
     clean_sentence = re.sub(r'[^\w]', ' ', sentence.lower())
     words_in_sentence = clean_sentence.split()
-    word_found = any(clean_word == w for w in words_in_sentence)
+    
+    # Robust matching: Exact or with common suffixes (ed, ing, s, es, d, ies, ied)
+    def is_match(target, candidate):
+        if target == candidate: return True
+        # Common suffixes
+        suffixes = ['s', 'es', 'ed', 'd', 'ing', 'ies', 'ied']
+        for sfx in suffixes:
+            if candidate == target + sfx: return True
+        
+        # Handle y -> ies/ied (e.g., study -> studies)
+        if target.endswith('y'):
+            stem = target[:-1]
+            if candidate == stem + 'ies' or candidate == stem + 'ied' or candidate == stem + 'ying':
+                return True
+        # Handle double consonant for 'ing' (e.g., slam -> slamming)
+        # We check if candidate looks like target + last_char + 'ing'
+        if len(target) > 2 and candidate == target + target[-1] + 'ing':
+            return True
+        if len(target) > 2 and candidate == target + target[-1] + 'ed':
+            return True
+            
+        return False
+
+    word_found = any(is_match(clean_word, w) for w in words_in_sentence)
     # --- HARD TRIVIAL ANSWER CHECK ---
     # Detect if user just copy-pasted the word or wrote something extremely short containing the word
     cleaned_s = sentence.strip().lower()

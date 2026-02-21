@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
-from database import engine, get_db, init_db, User, Vocabulary, QuizResult, Course, Enrollment, ImageInteraction, ImageRating
+from database import engine, get_db, init_db, User, Vocabulary, QuizResult, Course, Enrollment, ImageInteraction, ImageRating, SystemSetting
 import utils
 import json
 import random
@@ -101,11 +101,33 @@ from auth import get_current_user_req
 
 @app.get("/", response_class=HTMLResponse)
 async def login_page(request: Request, user: User = Depends(get_current_user_req)):
+    # Browser detection
+    user_agent = request.headers.get("user-agent", "").lower()
+    is_line = "line/" in user_agent
+    is_fb = "fbav/" in user_agent or "fban/" in user_agent
+    is_instagram = "instagram" in user_agent
+    is_in_app = is_line or is_fb or is_instagram
+    
+    # LINE specific: auto-redirect if not using external browser parameter
+    if is_line and "openExternalBrowser=1" not in str(request.url):
+        # Construct the URL with the parameter
+        target_url = str(request.url)
+        if "?" in target_url:
+            target_url += "&openExternalBrowser=1"
+        else:
+            target_url += "?openExternalBrowser=1"
+        return RedirectResponse(url=target_url)
+
     if user:
         if user.is_admin:
             return RedirectResponse(url="/admin/entry_choice", status_code=303)
         return RedirectResponse(url="/courses", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request})
+    
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "is_in_app": is_in_app,
+        "is_fb_ig": is_fb or is_instagram
+    })
 
 @app.post("/login")
 async def login(request: Request, email: str = Form(...), db: Session = Depends(get_db)):
@@ -161,6 +183,10 @@ async def course_list(request: Request, user: User = Depends(get_current_user_re
     user_course_ids = [e.course_id for e in user.enrollments]
     official_course_ids = [c.id for c in official_courses]
     
+    # Fetch system settings
+    youtube_setting = db.query(SystemSetting).filter(SystemSetting.setting_key == "global_youtube_urls").first()
+    youtube_urls = youtube_setting.setting_value if youtube_setting else ""
+    
     return templates.TemplateResponse("course_list.html", {
         "request": request, 
         "official_courses": official_courses, 
@@ -170,7 +196,8 @@ async def course_list(request: Request, user: User = Depends(get_current_user_re
         "user_course_ids": user_course_ids, 
         "official_course_ids": official_course_ids,
         "is_admin": getattr(user, "is_admin", False),
-        "user_id": user.id
+        "user_id": user.id,
+        "global_youtube_urls": youtube_urls
     })
 
 @app.get("/join/{course_id}")
@@ -220,20 +247,22 @@ async def join_course(course_id: int, user: User = Depends(get_current_user_req)
             mirror_course = db.query(Course).filter(Course.name == mirror_name).first()
             
             if mirror_course and mirror_course.group_names:
-                # Check if already enrolled in mirror
-                mirror_exists = db.query(Enrollment).filter(
+                mirror_enrollment = db.query(Enrollment).filter(
                     Enrollment.user_id == user.id,
                     Enrollment.course_id == mirror_course.id
                 ).first()
                 
-                if not mirror_exists:
-                    # Calculate Rotated Group
-                    groups = [g.strip() for g in course.group_names.split(",") if g.strip()]
-                    if assigned_group in groups:
-                        idx = groups.index(assigned_group)
-                        # Cyclic Rotation: Next group in list
-                        rotated_group = groups[(idx + 1) % len(groups)]
-                        
+                # Calculate Rotated Group
+                groups = [g.strip() for g in course.group_names.split(",") if g.strip()]
+                if assigned_group in groups:
+                    idx = groups.index(assigned_group)
+                    # Cyclic Rotation: Next group in list
+                    rotated_group = groups[(idx + 1) % len(groups)]
+                    
+                    if mirror_enrollment:
+                        mirror_enrollment.group = rotated_group
+                        print(f"Updated existing Mirror Enrollment for user {user.id} to Group {rotated_group}")
+                    else:
                         mirror_enrollment = Enrollment(
                             user_id=user.id,
                             course_id=mirror_course.id,
@@ -278,11 +307,16 @@ async def admin_panel(request: Request, user: User = Depends(get_current_user_re
         return HTMLResponse(content="Unauthorized", status_code=401)
     
     courses = db.query(Course).filter(Course.is_deleted == False).all()
-    # No longer loading all vocab here
+    
+    # Fetch system settings
+    youtube_setting = db.query(SystemSetting).filter(SystemSetting.setting_key == "global_youtube_urls").first()
+    youtube_urls = youtube_setting.setting_value if youtube_setting else ""
+    
     return templates.TemplateResponse("admin.html", {
         "request": request, 
         "courses": courses,
-        "is_admin": True
+        "is_admin": True,
+        "global_youtube_urls": youtube_urls
     })
 
 @app.get("/admin/course/{course_id}", response_class=HTMLResponse)
@@ -441,6 +475,7 @@ async def admin_users(request: Request, course_id: str = None, attempt: str = No
                 "user_id": r.user_id,
                 "email": email,
                 "course_name": course_name,
+                "course_id": r.course_id,
                 "group": group,
                 "submitted_at": local_time.strftime("%Y-%m-%d %H:%M") if local_time else "-"
             },

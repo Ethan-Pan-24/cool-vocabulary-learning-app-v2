@@ -9,6 +9,11 @@ engine = create_engine(URSQLALCHEMY_DATABASE_URL, connect_args={"check_same_thre
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+    setting_key = Column(String, primary_key=True, index=True)
+    setting_value = Column(Text, nullable=True)
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)

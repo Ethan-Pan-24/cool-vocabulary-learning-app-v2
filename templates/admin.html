@@ -41,9 +41,30 @@
         <button class="nav-link" id="time-series-tab" data-bs-toggle="tab" data-bs-target="#timeSeries"
             type="button">Time Series Analysis</button>
     </li>
+    <li class="nav-item">
+        <button class="nav-link" id="system-settings-tab" data-bs-toggle="tab" data-bs-target="#systemSettings"
+            type="button">System Settings</button>
+    </li>
 </ul>
 
 <div class="tab-content" id="adminTabsContent">
+    <!-- SYSTEM SETTINGS -->
+    <div class="tab-pane fade" id="systemSettings" role="tabpanel">
+        <div class="card p-4 shadow-sm mb-4">
+            <h4>System-Wide Settings</h4>
+            <form action="/admin_api/update_system_settings" method="post">
+                <div class="mb-3">
+                    <label class="form-label">Global YouTube Video URLs (One per line)</label>
+                    <textarea name="global_youtube_urls" class="form-control" rows="5"
+                        placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/...">{{ global_youtube_urls }}</textarea>
+                    <div class="form-text">These videos will appear at the top of the Course Explore page for all users.
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Save Settings</button>
+            </form>
+        </div>
+    </div>
+
     <!-- COURSE MANAGEMENT -->
     <div class="tab-pane fade show active" id="courses" role="tabpanel">
         <div class="row">

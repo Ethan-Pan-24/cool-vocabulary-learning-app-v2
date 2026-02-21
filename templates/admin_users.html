@@ -106,11 +106,17 @@
                     </td>
                     <td>
                         <form action="/admin_api/delete_user_result/{{ r.meta.result_id }}" method="post"
-                            onsubmit="return confirm('Delete this result? (Can be restored from Recycle Bin)');">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                            onsubmit="return confirm('Delete this result? (Can be restored from Recycle Bin)');"
+                            class="d-inline">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Result Only">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </form>
+                        <button class="btn btn-sm btn-outline-warning"
+                            onclick="unenrollUser({{ r.meta.user_id }}, {{ r.meta.course_id }}, '{{ r.meta.email }}')"
+                            title="Un-enroll & Reset Group (Permanent)">
+                            <i class="bi bi-person-x-fill"></i> Reset
+                        </button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -321,6 +327,26 @@
         }
         html += `</tbody>`;
         t.innerHTML = html;
+    }
+    async function unenrollUser(userId, courseId, email) {
+        if (!confirm(`Are you sure you want to PERMANENTLY un-enroll ${email}?\n\nThis will remove their enrollment and ALL quiz results for this course, allowing them to be re-assigned to a new group next time they join.`)) {
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/admin_api/unenroll_user/${userId}/${courseId}`, {
+                method: 'POST'
+            });
+            const data = await resp.json();
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        } catch (e) {
+            alert('Failed to un-enroll user: ' + e);
+        }
     }
 </script>
 {% endblock %}

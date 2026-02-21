@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Form, Request, HTTPException, UploadFile
 from typing import List, Optional
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
-from database import get_db, Vocabulary, User, QuizResult, Course, Enrollment, ImageInteraction, ImageRating, DeletedContainer
+from database import get_db, Vocabulary, User, QuizResult, Course, Enrollment, ImageInteraction, ImageRating, DeletedContainer, SystemSetting
 from utils import score_sentence_ai, ADMIN_EMAILS
 from auth import get_current_user_req
 import io
@@ -896,6 +896,26 @@ async def empty_result_trash(db: Session = Depends(get_db)):
 
 from utils import ADMIN_EMAILS
 
+@router.post("/update_system_settings")
+async def update_system_settings(
+    global_youtube_urls: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_req)
+):
+    if not current_user or not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    # Update YouTube URLs
+    setting = db.query(SystemSetting).filter(SystemSetting.setting_key == "global_youtube_urls").first()
+    if not setting:
+        setting = SystemSetting(setting_key="global_youtube_urls", setting_value=global_youtube_urls)
+        db.add(setting)
+    else:
+        setting.setting_value = global_youtube_urls
+        
+    db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
 @router.post("/reset_course_data/{course_id}")
 async def reset_course_data(course_id: int, db: Session = Depends(get_db)):
     # Delete QuizResults for this course
@@ -904,8 +924,20 @@ async def reset_course_data(course_id: int, db: Session = Depends(get_db)):
     # Delete Enrollments for this course
     db.query(Enrollment).filter(Enrollment.course_id == course_id).delete()
     
-    # Optionally delete Users who have NO other enrollments if we wanted to be strict,
-    # but for "Reset Course Data", cleaning results/enrollments is usually enough.
+    # Delete Image Ratings & Interactions
+    db.query(ImageRating).filter(ImageRating.course_id == course_id).delete()
+    db.query(ImageInteraction).filter(ImageInteraction.course_id == course_id).delete()
+
+    # 3. Handle Mirror Course Reset
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if course:
+        mirror_name = f"{course.name} (Mirror)"
+        mirror_course = db.query(Course).filter(Course.name == mirror_name).first()
+        if mirror_course:
+            db.query(QuizResult).filter(QuizResult.course_id == mirror_course.id).delete()
+            db.query(Enrollment).filter(Enrollment.course_id == mirror_course.id).delete()
+            db.query(ImageRating).filter(ImageRating.course_id == mirror_course.id).delete()
+            db.query(ImageInteraction).filter(ImageInteraction.course_id == mirror_course.id).delete()
     
     db.commit()
     return RedirectResponse(url=f"/admin/course/{course_id}", status_code=303)
@@ -914,6 +946,8 @@ async def reset_course_data(course_id: int, db: Session = Depends(get_db)):
 async def delete_all_data(db: Session = Depends(get_db)):
     db.query(QuizResult).delete()
     db.query(Enrollment).delete()
+    db.query(ImageRating).delete()
+    db.query(ImageInteraction).delete()
     
     # Delete only NON-ADMIN users
     # Filter users where email NOT IN ADMIN_EMAILS
@@ -2102,43 +2136,60 @@ async def restore_stage(course_id: int = Form(...), group_name: str = Form(...),
 
 @router.get("/image_analytics")
 async def get_image_analytics(course_id: int = None, db: Session = Depends(get_db)):
-    # Query all interactions, optionally filtered by course
-    query = db.query(ImageInteraction)
+    # 1. Query Interactions (for views)
+    interaction_query = db.query(ImageInteraction)
     if course_id:
-        query = query.filter(ImageInteraction.course_id == course_id)
+        interaction_query = interaction_query.filter(ImageInteraction.course_id == course_id)
+    interactions = interaction_query.all()
     
-    interactions = query.all()
-    
-    # Aggregate data by image_url
+    # 2. Query Ratings (for likes/dislikes)
+    rating_query = db.query(ImageRating)
+    if course_id:
+        rating_query = rating_query.filter(ImageRating.course_id == course_id)
+    ratings = rating_query.all()
+
     analytics = {}
-    for interaction in interactions:
-        url = interaction.image_url
+
+    def get_entry(url, course_id_val, vocab_id_val):
         if url not in analytics:
             analytics[url] = {
                 "image_url": url,
-                "vocab_id": interaction.vocab_id,
-                "course_id": interaction.course_id,
+                "vocab_id": vocab_id_val,
+                "course_id": course_id_val,
                 "likes": 0,
                 "dislikes": 0,
                 "views": 0,
                 "unique_viewers": set()
             }
-        
-        if interaction.action == "like":
-            analytics[url]["likes"] += 1
-        elif interaction.action == "dislike":
-            analytics[url]["dislikes"] += 1
-        elif interaction.action == "view":
-            analytics[url]["views"] += 1
-            analytics[url]["unique_viewers"].add(interaction.user_id)
+        return analytics[url]
+
+    # Process Interactions (mostly for views)
+    for inter in interactions:
+        entry = get_entry(inter.image_url, inter.course_id, inter.vocab_id)
+        if inter.action == "view":
+            entry["views"] += 1
+            entry["unique_viewers"].add(inter.user_id)
+        elif inter.action == "like":
+            entry["likes"] += 1
+        elif inter.action == "dislike":
+            entry["dislikes"] += 1
+
+    # Process Explicit Ratings (Likerts/Thumbs)
+    for r in ratings:
+        entry = get_entry(r.image_url, r.course_id, r.vocab_id)
+        if r.rating == 1:
+            entry["likes"] += 1
+        elif r.rating == -1:
+            entry["dislikes"] += 1
+        # If rating is 0, we don't count it as like/dislike
     
-    # Convert to list and add metadata (vocab word, etc.)
+    # Convert to list and add metadata
     result = []
     for data in analytics.values():
         data["unique_viewers"] = len(data["unique_viewers"])
         data["word"] = "N/A"
+        data["chinese"] = ""
         
-        # Fetch vocab word if vocab_id exists
         if data["vocab_id"]:
             vocab = db.query(Vocabulary).filter(Vocabulary.id == data["vocab_id"]).first()
             if vocab:
@@ -3138,3 +3189,62 @@ async def create_mirror_course(
         "message": f"Created mirror course '{new_course.name}' with {count_swapped} students rotated.",
         "course_id": new_course.id
     }
+
+@router.post("/unenroll_user/{user_id}/{course_id}")
+async def unenroll_user(
+    user_id: int,
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_req)
+):
+    if not current_user or not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # 1. Delete Enrollment
+    db.query(Enrollment).filter(
+        Enrollment.user_id == user_id,
+        Enrollment.course_id == course_id
+    ).delete()
+
+    # 2. Hard Delete QuizResults for this user/course to ensure clean reset
+    db.query(QuizResult).filter(
+        QuizResult.user_id == user_id,
+        QuizResult.course_id == course_id
+    ).delete()
+
+    # 4. Cleanup Image Ratings & Interactions
+    db.query(ImageRating).filter(
+        ImageRating.user_id == user_id,
+        ImageRating.course_id == course_id
+    ).delete()
+    db.query(ImageInteraction).filter(
+        ImageInteraction.user_id == user_id,
+        ImageInteraction.course_id == course_id
+    ).delete()
+
+    # 3. Handle Mirror Course Auto-Unenrollment
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if course:
+        mirror_name = f"{course.name} (Mirror)"
+        mirror_course = db.query(Course).filter(Course.name == mirror_name).first()
+        if mirror_course:
+            db.query(Enrollment).filter(
+                Enrollment.user_id == user_id,
+                Enrollment.course_id == mirror_course.id
+            ).delete()
+            db.query(QuizResult).filter(
+                QuizResult.user_id == user_id,
+                QuizResult.course_id == mirror_course.id
+            ).delete()
+            # Also cleanup ratings for mirror
+            db.query(ImageRating).filter(
+                ImageRating.user_id == user_id,
+                ImageRating.course_id == mirror_course.id
+            ).delete()
+            db.query(ImageInteraction).filter(
+                ImageInteraction.user_id == user_id,
+                ImageInteraction.course_id == mirror_course.id
+            ).delete()
+
+    db.commit()
+    return {"status": "success", "message": "User un-enrolled and reset successfully."}

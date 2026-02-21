@@ -16,6 +16,40 @@
     </div>
 </div>
 
+<!-- Global Supplemental Videos -->
+{% if global_youtube_urls %}
+<div class="card shadow-sm mb-4 border-0 bg-light">
+    <div class="card-body p-4">
+        <h4 class="mb-3 text-danger"><i class="bi bi-youtube"></i> Tutorial</h4>
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3">
+            {% for url in global_youtube_urls.replace('\r', '').split('\n') %}
+            {% set u = url.strip() %}
+            {% if u %}
+            {% set video_id = '' %}
+            {% if 'v=' in u %}{% set video_id = u.split('v=')[1].split('&')[0] %}
+            {% elif 'youtu.be/' in u %}{% set video_id = u.split('youtu.be/')[1].split('?')[0] %}
+            {% endif %}
+
+            {% if video_id %}
+            <div class="col">
+                <div class="ratio ratio-16x9 shadow-sm rounded overflow-hidden mb-2">
+                    <iframe src="https://www.youtube.com/embed/{{ video_id }}" title="YouTube video"
+                        allowfullscreen></iframe>
+                </div>
+                <div class="text-center">
+                    <a href="{{ u }}" target="_blank" class="btn btn-sm btn-link text-decoration-none">
+                        <i class="bi bi-box-arrow-up-right"></i> Open on YouTube
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Tabs -->
 <ul class="nav nav-pills mb-4" id="courseTab" role="tablist">
     <li class="nav-item" role="presentation">
